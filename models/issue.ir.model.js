@@ -1,9 +1,19 @@
 const mongoose = require("mongoose");
 const Issue = require("./issue.model");
 
+// Individual vs Group vs National, per the requirements doc's "so single, group and
+// national issues can be captured against the correct members" line (Logging an Issue
+// intro) and the "Members: Grid of contacts, to be used if IR Case Type = Group" line
+// (Industrial Relations field list) - the field the Members grid's visibility depends on.
+const CASE_TYPES = ["INDIVIDUAL", "GROUP", "NATIONAL"];
+
 const IrSchema = new mongoose.Schema({
   // Unique, format "YY-{initials}-{6digit}" - see services/referenceNumberGenerator.js.
   caseFileNumber: { type: String, default: null, index: true },
+
+  // Drives whether the frontend's Members grid (multi-contact) is shown vs a single member
+  // link - see CASE_TYPES comment above.
+  caseType: { type: String, enum: CASE_TYPES, default: "INDIVIDUAL" },
 
   correspondenceWithExternalParty: { type: Boolean, default: false },
 
@@ -30,3 +40,4 @@ IrSchema.index({ tenantId: 1, caseFileNumber: 1 }, { unique: true, sparse: true 
 const Ir = Issue.discriminator("IR", IrSchema);
 
 module.exports = Ir;
+module.exports.CASE_TYPES = CASE_TYPES;

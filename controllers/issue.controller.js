@@ -9,6 +9,7 @@ const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
 const issueEvents = require("../rabbitMQ/publishers/issue.events.publisher.js");
 const { publishSafely } = require("../utils/publishSafely");
+const profileServiceClient = require("../services/profileService.client");
 
 // Every publish below is best-effort: a RabbitMQ hiccup must never fail the HTTP response
 // that already succeeded against Mongo (same principle as issue.service.js's
@@ -52,6 +53,31 @@ function baseListFilter(req) {
   );
 }
 
+// Shared aggregation tail for both listIssues and searchIssues: priority (HIGH first) then
+// most-recently-created first, per the plan's grid requirements (§4.4 item 8) - priority is
+// a string enum so a plain field sort would order alphabetically (HIGH, LOW, MEDIUM), not by
+// severity. Factored out so the two endpoints can't drift on sort order.
+function priorityThenCreatedSortStages() {
+  return [
+    {
+      $addFields: {
+        _priorityWeight: {
+          $switch: {
+            branches: [
+              { case: { $eq: ["$priority", "HIGH"] }, then: 0 },
+              { case: { $eq: ["$priority", "MEDIUM"] }, then: 1 },
+              { case: { $eq: ["$priority", "LOW"] }, then: 2 },
+            ],
+            default: 3,
+          },
+        },
+      },
+    },
+    { $sort: { _priorityWeight: 1, createdOn: -1 } },
+    { $project: { _priorityWeight: 0 } },
+  ];
+}
+
 async function listIssues(req, res, next) {
   try {
     const { issueType, priority, issueStatus, q } = req.query;
@@ -69,32 +95,90 @@ async function listIssues(req, res, next) {
       ];
     }
 
-    // Default sort: priority (HIGH first) then most-recently-created first, per the plan's
-    // grid requirements (§4.4 item 8) - priority is a string enum so a plain field sort
-    // would order alphabetically (HIGH, LOW, MEDIUM), not by severity.
     const issues = await Issue.aggregate([
       { $match: filter },
-      {
-        $addFields: {
-          _priorityWeight: {
-            $switch: {
-              branches: [
-                { case: { $eq: ["$priority", "HIGH"] }, then: 0 },
-                { case: { $eq: ["$priority", "MEDIUM"] }, then: 1 },
-                { case: { $eq: ["$priority", "LOW"] }, then: 2 },
-              ],
-              default: 3,
-            },
-          },
-        },
-      },
-      { $sort: { _priorityWeight: 1, createdOn: -1 } },
-      { $project: { _priorityWeight: 0 } },
+      ...priorityThenCreatedSortStages(),
     ]);
 
     return res.status(200).json({ success: true, data: issues });
   } catch (error) {
     return next(AppError.internalServerError(error.message || "Failed to list issues"));
+  }
+}
+
+/**
+ * GET /issues/search?q= - "Find Issues" (requirements doc: "User should be able to find a
+ * query or issue by a variety of criteria. Including Unique reference number, membership
+ * no, surname, mobile, email, NMBI, issue type, workplace, WRC case number"). Reuses
+ * baseListFilter/priorityThenCreatedSortStages exactly as listIssues does, so tenant
+ * scoping, team-visibility (getAllowedIssueTypes), and complaint-hide filtering all apply
+ * identically here - a search never surfaces an issue the caller couldn't otherwise list.
+ *
+ * Local match (this collection): internalReferenceNumber, caseFileNumber (IR-only,
+ * present on the base "issues" collection since discriminators share it), wrcCaseNumber
+ * (IR-only), and issueType (exact match when q case-insensitively equals one of
+ * COMPLAINT|FTP|IR|DATA_PROTECTION).
+ *
+ * Member match: delegates to profileServiceClient.searchProfiles (membership no, surname,
+ * mobile, email - see that file's own doc comment for exactly what profile-service's
+ * `/api/profile/search` matches, including what it does NOT match) and adds a
+ * `memberIds: { $in: [...] }` clause for any matching profile ids. Best-effort: a
+ * profile-service hiccup degrades to local-only results rather than failing the search,
+ * same principle as issue.service.js's resolveContactName/resolveIroOwnerUserId.
+ *
+ * Workplace is NOT covered: profile-service's `/api/profile/search` has no workplace/
+ * workLocation filter param at all (verified against controllers/profile.controller.js's
+ * searchProfiles there - only q/query/limit) - see this service's CLAUDE.md-adjacent notes
+ * / the PR description for this gap. Adding workplace search would mean extending
+ * profile-service's endpoint, out of scope for an issue-service-only change.
+ */
+async function searchIssues(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const q = String(req.query.q || "").trim();
+    if (!q) {
+      return next(AppError.badRequest("q query parameter is required"));
+    }
+
+    const filter = baseListFilter(req);
+
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "i");
+    const orConditions = [
+      { internalReferenceNumber: regex },
+      { caseFileNumber: regex },
+      { wrcCaseNumber: regex },
+    ];
+
+    const upperQ = q.toUpperCase();
+    if (Issue.ISSUE_TYPES.includes(upperQ)) {
+      orConditions.push({ issueType: upperQ });
+    }
+
+    let matchedProfiles = [];
+    try {
+      matchedProfiles = await profileServiceClient.searchProfiles(q, { req, tenantId });
+    } catch (error) {
+      console.warn("[issue.controller] searchIssues member lookup failed:", error.message);
+      matchedProfiles = [];
+    }
+    const matchedProfileIds = (Array.isArray(matchedProfiles) ? matchedProfiles : [])
+      .map((profile) => (profile && profile._id ? String(profile._id) : null))
+      .filter(Boolean);
+    if (matchedProfileIds.length > 0) {
+      orConditions.push({ memberIds: { $in: matchedProfileIds } });
+    }
+
+    filter.$or = orConditions;
+
+    const issues = await Issue.aggregate([
+      { $match: filter },
+      ...priorityThenCreatedSortStages(),
+    ]);
+
+    return res.status(200).json({ success: true, data: issues });
+  } catch (error) {
+    return next(AppError.internalServerError(error.message || "Failed to search issues"));
   }
 }
 
@@ -374,6 +458,7 @@ async function softDeleteIssue(req, res, next) {
 
 module.exports = {
   listIssues,
+  searchIssues,
   getIssueById,
   createIssue,
   updateIssue,

@@ -31,7 +31,14 @@ function buildHeaders(req, tenantId) {
   return headers;
 }
 
-/** Member search, for linking a member to an issue (name/membership no/dob/email/etc). */
+/**
+ * Member search, for linking a member to an issue. Backed by profile-service's
+ * `GET /api/profile/search?q=` (controllers/profile.controller.js's searchProfiles) -
+ * actually matches membershipNumber (prefix), email (normalized + personal/work/preferred
+ * regex), forename/surname/full-name, and mobile/telephone number (plus digits-only). It
+ * does NOT match on DOB, NMBI number, or address, despite older comments here claiming
+ * otherwise - verified against that controller's code, not assumed.
+ */
 async function searchProfiles(query, { req, tenantId } = {}) {
   const base = PROFILE_SERVICE_URL.replace(/\/$/, "");
   try {
@@ -42,7 +49,10 @@ async function searchProfiles(query, { req, tenantId } = {}) {
       validateStatus: (status) => status < 500,
     });
     if (response.status >= 400) return [];
-    return response.data?.data || [];
+    // Response envelope is { status: "success", data: { count, results } } (see that
+    // service's response.mw.js res.success()) - the profile array is data.results, not
+    // data itself.
+    return response.data?.data?.results || [];
   } catch (error) {
     console.error("[profileService.client] searchProfiles failed:", error.message);
     return [];

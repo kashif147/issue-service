@@ -4,6 +4,15 @@ const issueController = require("../controllers/issue.controller.js");
 const { defaultPolicyMiddleware } = require("../middlewares/policy.middleware.js");
 
 router.get("/", defaultPolicyMiddleware.requirePermission("issues", "read"), issueController.listIssues);
+
+// Must be registered before "/:id" - Express matches routes in registration order, and
+// "/:id" would otherwise swallow "/search" as an :id value of "search".
+router.get(
+  "/search",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueController.searchIssues,
+);
+
 router.get("/:id", defaultPolicyMiddleware.requirePermission("issues", "read"), issueController.getIssueById);
 router.post("/", defaultPolicyMiddleware.requirePermission("issues", "write"), issueController.createIssue);
 
