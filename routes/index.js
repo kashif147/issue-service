@@ -6,6 +6,7 @@ router.use("/issues", require("./issue.routes"));
 router.use("/", require("./issueActivity.routes"));
 router.use("/iro-pa-assignments", require("./iroPaAssignment.routes"));
 router.use("/issue-designations", require("./issueDesignation.routes"));
+router.use("/", require("./issueLookup.routes"));
 router.use("/templates", require("./issueTemplate.routes"));
 
 module.exports = router;

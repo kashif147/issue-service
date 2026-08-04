@@ -21,7 +21,7 @@ const DISCRIMINATOR_MODELS = {
   COMPLAINT: Complaint,
   FTP: Ftp,
   IR: Ir,
-  DATA_PROTECTION: DataProtection,
+  DP: DataProtection,
 };
 
 // Fields the caller may never set/overwrite directly via create/update payloads.
@@ -117,7 +117,7 @@ async function listIssues(req, res, next) {
  * Local match (this collection): internalReferenceNumber, caseFileNumber (IR-only,
  * present on the base "issues" collection since discriminators share it), wrcCaseNumber
  * (IR-only), and issueType (exact match when q case-insensitively equals one of
- * COMPLAINT|FTP|IR|DATA_PROTECTION).
+ * COMPLAINT|FTP|IR|DP).
  *
  * Member match: delegates to profileServiceClient.searchProfiles (membership no, surname,
  * mobile, email - see that file's own doc comment for exactly what profile-service's

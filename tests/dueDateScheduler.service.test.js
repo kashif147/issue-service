@@ -48,13 +48,13 @@ describe("dueDateScheduler.service", () => {
   });
 
   describe("buildDueDateScanFilter", () => {
-    it("scopes to COMPLAINT/DATA_PROTECTION only (the literal-spec interpretation)", () => {
-      expect(DUE_DATE_ISSUE_TYPES).toEqual(["COMPLAINT", "DATA_PROTECTION"]);
+    it("scopes to COMPLAINT/DP only (the literal-spec interpretation)", () => {
+      expect(DUE_DATE_ISSUE_TYPES).toEqual(["COMPLAINT", "DP"]);
       expect(DUE_DATE_ISSUE_TYPES).not.toContain("IR");
       expect(DUE_DATE_ISSUE_TYPES).not.toContain("FTP");
 
       const filter = buildDueDateScanFilter(new Date("2026-08-02T00:00:00.000Z"));
-      expect(filter.issueType).toEqual({ $in: ["COMPLAINT", "DATA_PROTECTION"] });
+      expect(filter.issueType).toEqual({ $in: ["COMPLAINT", "DP"] });
       expect(filter.issueStatus).toEqual({ $ne: "CLOSED" });
       expect(filter.priority).toEqual({ $ne: "HIGH" });
       expect(filter["meta.deleted"]).toEqual({ $ne: true });

@@ -9,7 +9,7 @@ const mongoose = require("mongoose");
 // `docs/Issue Management Requirements.docx` (see the "Logging an Issue" section), mapped
 // onto SCREAMING_SNAKE_CASE constants - the *Other free-text fields exist because the doc's
 // dropdowns each include an "Other" option with a companion textbox.
-const ISSUE_TYPES = ["COMPLAINT", "FTP", "IR", "DATA_PROTECTION"];
+const ISSUE_TYPES = ["COMPLAINT", "FTP", "IR", "DP"];
 
 const ISSUE_STATUSES = [
   "ACTIVE",
@@ -123,7 +123,7 @@ const IssueSchema = new mongoose.Schema(
     // Set by services/dueDateScheduler.service.js (plan §1.4) each time it escalates this
     // issue's priority to HIGH for an approaching due date - guards against a scheduler
     // restart mid-day re-sending the same day's notification. Only meaningful for
-    // COMPLAINT/DATA_PROTECTION issues (the only two types with a dueDate field at all -
+    // COMPLAINT/DP issues (the only two types with a dueDate field at all -
     // see models/issue.complaint.model.js / issue.dataprotection.model.js).
     lastDueDateReminderAt: { type: Date, default: null },
 

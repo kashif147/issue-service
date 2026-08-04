@@ -12,7 +12,7 @@ const { publishSafely } = require("../utils/publishSafely");
 // Complaint/DataProtection ONLY. Extending this to IR/FTP is blocked on those types
 // getting a dueDate field added first - a business decision, not something to guess at
 // here - so DUE_DATE_ISSUE_TYPES below deliberately does not include "IR"/"FTP".
-const DUE_DATE_ISSUE_TYPES = ["COMPLAINT", "DATA_PROTECTION"];
+const DUE_DATE_ISSUE_TYPES = ["COMPLAINT", "DP"];
 
 const LOOKAHEAD_DAYS = 7;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;

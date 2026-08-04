@@ -33,7 +33,7 @@ DataProtectionSchema.pre("validate", function dpcInformedDatetimeRequired(next) 
   next();
 });
 
-const DataProtection = Issue.discriminator("DATA_PROTECTION", DataProtectionSchema);
+const DataProtection = Issue.discriminator("DP", DataProtectionSchema);
 
 module.exports = DataProtection;
 module.exports.SEVERITIES = SEVERITIES;

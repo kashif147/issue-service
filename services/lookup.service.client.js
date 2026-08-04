@@ -167,9 +167,54 @@ async function searchIssueDesignations(query, { req, tenantId } = {}) {
   }));
 }
 
+/**
+ * Issue Type options (LookupType code "ISST") for the Create/Edit Cases dropdown - replaces
+ * the formerly-hardcoded ISSUE_TYPES constant. Flat list, no parent filtering.
+ */
+async function fetchIssueTypes({ req, tenantId } = {}) {
+  const headers = buildHeaders(req, tenantId);
+  const types = await fetchLookupsByTypeCode("ISST", headers);
+  return types.map((lookup) => ({
+    id: lookup?._id || null,
+    code: lookup?.code || null,
+    displayName: lookup?.DisplayName || lookup?.lookupname || null,
+  }));
+}
+
+/**
+ * Issue Status options (LookupType code "ISSUSTATUS") for a given Issue Type - each status
+ * Lookup is a child of its Issue Type's Lookup value (Parentlookupid), same hierarchy
+ * mechanism as WORKLOC's Region -> Branch -> Work Location chain. issueTypeCode is the
+ * Issue Type's own Lookup.code (e.g. "COMPLAINT", "DP"), not the LookupType code.
+ */
+async function fetchIssueStatuses(issueTypeCode, { req, tenantId } = {}) {
+  const code = String(issueTypeCode || "").trim();
+  if (!code) return [];
+
+  const headers = buildHeaders(req, tenantId);
+  const [issueTypes, statuses] = await Promise.all([
+    fetchLookupsByTypeCode("ISST", headers),
+    fetchLookupsByTypeCode("ISSUSTATUS", headers),
+  ]);
+
+  const matchedType = issueTypes.find((lookup) => normalizeKey(lookup?.code) === normalizeKey(code));
+  if (!matchedType?._id) return [];
+
+  const parentId = normalizeKey(matchedType._id);
+  return statuses
+    .filter((lookup) => normalizeKey(lookup?.Parentlookupid) === parentId)
+    .map((lookup) => ({
+      id: lookup?._id || null,
+      code: lookup?.code || null,
+      displayName: lookup?.DisplayName || lookup?.lookupname || null,
+    }));
+}
+
 module.exports = {
   buildHeaders,
   fetchLookupsByTypeCode,
   findWorkLocationLookup,
   searchIssueDesignations,
+  fetchIssueTypes,
+  fetchIssueStatuses,
 };

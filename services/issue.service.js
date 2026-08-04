@@ -6,7 +6,7 @@ const OWNER_TEAM_BY_ISSUE_TYPE = {
   COMPLAINT: "COMPLAINTS",
   FTP: "FTP",
   IR: "IR",
-  DATA_PROTECTION: "DATA_PROTECTION",
+  DP: "DATA_PROTECTION",
 };
 
 // issueType -> the RBAC resource slug gating that team's issues (issues-complaints,
@@ -15,7 +15,7 @@ const TEAM_RESOURCE_BY_ISSUE_TYPE = {
   COMPLAINT: "issues-complaints",
   FTP: "issues-ftp",
   IR: "issues-ir",
-  DATA_PROTECTION: "issues-dataprotection",
+  DP: "issues-dataprotection",
 };
 
 function teamResourceForIssueType(issueType) {
