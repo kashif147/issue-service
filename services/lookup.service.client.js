@@ -233,26 +233,53 @@ async function fetchIssueSources({ req, tenantId } = {}) {
 }
 
 /**
- * Issue Status options (LookupType code "ISSUSTATUS") for a given Issue Type - each status
- * Lookup is a child of its Issue Type's Lookup value (Parentlookupid), same hierarchy
- * mechanism as WORKLOC's Region -> Branch -> Work Location chain. issueTypeCode is the
- * Issue Type's own Lookup.code (e.g. "COMPLAINT", "DP"), not the LookupType code.
+ * Options for a LookupType whose values are each a child (Parentlookupid) of a specific
+ * Issue Type's Lookup value under "ISST" - same hierarchy mechanism as WORKLOC's
+ * Region -> Branch -> Work Location chain. issueTypeCode is the Issue Type's own Lookup.code
+ * (e.g. "COMPLAINT", "DP"), not the LookupType code.
  */
-async function fetchIssueStatuses(issueTypeCode, { req, tenantId } = {}) {
+async function fetchLookupsScopedToIssueType(lookupTypeCode, issueTypeCode, { req, tenantId } = {}) {
   const code = String(issueTypeCode || "").trim();
   if (!code) return [];
 
   const headers = buildHeaders(req, tenantId);
-  const [issueTypes, statuses] = await Promise.all([
+  const [issueTypes, values] = await Promise.all([
     fetchLookupsByTypeCode("ISST", headers),
-    fetchLookupsByTypeCode("ISSUSTATUS", headers),
+    fetchLookupsByTypeCode(lookupTypeCode, headers),
   ]);
 
   const matchedType = issueTypes.find((lookup) => normalizeKey(lookup?.code) === normalizeKey(code));
   if (!matchedType?._id) return [];
 
   const parentId = normalizeKey(matchedType._id);
-  return toOptionList(statuses.filter((lookup) => normalizeKey(lookup?.Parentlookupid) === parentId));
+  return toOptionList(values.filter((lookup) => normalizeKey(lookup?.Parentlookupid) === parentId));
+}
+
+/**
+ * Issue Status options (LookupType code "ISSUSTATUS") for a given Issue Type - varies per
+ * issueTypeCode, so this stays a dedicated endpoint rather than joining the flat batch in
+ * fetchDropdownLookups below.
+ */
+async function fetchIssueStatuses(issueTypeCode, options = {}) {
+  return fetchLookupsScopedToIssueType("ISSUSTATUS", issueTypeCode, options);
+}
+
+/**
+ * Priority options (LookupType code "PRIORITY") - flat, no parent filtering. Codes
+ * (LOW/MEDIUM/HIGH) already match the backend's PRIORITIES enum exactly, no rename needed.
+ */
+async function fetchPriorities({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("PRIORITY", { req, tenantId });
+}
+
+/**
+ * Complaint Type options (LookupType code "CMPLNTYPE") - each value is a child of the
+ * COMPLAINT Issue Type's Lookup value (always, since Complaint Type only ever applies to
+ * COMPLAINT-typed issues), so this is fetchLookupsScopedToIssueType with a fixed parent
+ * rather than a caller-supplied one like Issue Status.
+ */
+async function fetchComplaintTypes({ req, tenantId } = {}) {
+  return fetchLookupsScopedToIssueType("CMPLNTYPE", "COMPLAINT", { req, tenantId });
 }
 
 module.exports = {
@@ -264,4 +291,6 @@ module.exports = {
   fetchIssueStatuses,
   fetchOrigins,
   fetchIssueSources,
+  fetchPriorities,
+  fetchComplaintTypes,
 };

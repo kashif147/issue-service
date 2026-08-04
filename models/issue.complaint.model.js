@@ -1,12 +1,10 @@
 const mongoose = require("mongoose");
 const Issue = require("./issue.model");
 
-const COMPLAINT_TYPES = [
-  "MEMBER_ON_MEMBER",
-  "MEMBER_ON_ORGANISATION",
-  "MEMBER_ON_SERVICE_PROVIDER",
-  "THIRD_PARTY_COMPLAINT",
-];
+// Codes match user-service's Lookup values under LookupType "CMPLNTYPE" exactly (see
+// models/issue.model.js's ISSUE_SOURCES comment for why - same live-lookup-driven dropdown
+// convention, hooks/useIssueLookups.js in the frontend app).
+const COMPLAINT_TYPES = ["MOM", "MOO", "MOSP", "TPC"];
 
 const SOLICITORS = ["O_CONNORS", "OTHER"];
 
@@ -38,16 +36,14 @@ const ComplaintSchema = new mongoose.Schema({
 
   respondents: { type: [RespondentSchema], default: [] },
 
-  // Required only when complaintType === "MEMBER_ON_SERVICE_PROVIDER" - enforced below in
-  // pre("validate"), not just the frontend.
+  // Required only when complaintType === "MOSP" (Member On Service Provider) - enforced
+  // below in pre("validate"), not just the frontend.
   serviceProvider: { type: String, default: null },
 });
 
 ComplaintSchema.pre("validate", function serviceProviderRequiredForMemberOnServiceProvider(next) {
-  if (this.complaintType === "MEMBER_ON_SERVICE_PROVIDER" && !this.serviceProvider) {
-    return next(
-      new Error("serviceProvider is required when complaintType is MEMBER_ON_SERVICE_PROVIDER"),
-    );
+  if (this.complaintType === "MOSP" && !this.serviceProvider) {
+    return next(new Error("serviceProvider is required when complaintType is MOSP"));
   }
   next();
 });

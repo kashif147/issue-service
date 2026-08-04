@@ -51,21 +51,28 @@ async function listIssueSources(req, res, next) {
   }
 }
 
-// Combines the 3 flat, non-dependent dropdown lookups (Issue Type, Origin, Issue Source)
-// into a single round trip - the Create/Edit Cases forms were firing 3 near-simultaneous
-// requests for these on mount, which was enough to trip the gateway's per-client
-// limit_req burst allowance (nginx api_rate zone, default.conf) on ordinary page loads.
-// Issue Status stays a separate endpoint since it's the one that actually depends on the
-// selected Issue Type and can't be prefetched up front.
+// Combines the flat, non-dependent dropdown lookups (Issue Type, Origin, Issue Source,
+// Priority, Complaint Type) into a single round trip - the Create/Edit Cases forms were
+// firing these as separate near-simultaneous requests on mount, which was enough to trip
+// the gateway's per-client limit_req burst allowance (nginx api_rate zone, default.conf) on
+// ordinary page loads. Complaint Type is always scoped to the COMPLAINT Issue Type (fixed,
+// not caller-supplied), so it belongs here rather than as its own endpoint. Issue Status
+// stays a separate endpoint since it depends on whichever Issue Type the user picks and
+// can't be prefetched up front.
 async function listDropdownLookups(req, res, next) {
   try {
     const { tenantId } = req.ctx;
-    const [issueTypes, origins, issueSources] = await Promise.all([
+    const [issueTypes, origins, issueSources, priorities, complaintTypes] = await Promise.all([
       lookupServiceClient.fetchIssueTypes({ req, tenantId }),
       lookupServiceClient.fetchOrigins({ req, tenantId }),
       lookupServiceClient.fetchIssueSources({ req, tenantId }),
+      lookupServiceClient.fetchPriorities({ req, tenantId }),
+      lookupServiceClient.fetchComplaintTypes({ req, tenantId }),
     ]);
-    return res.status(200).json({ success: true, data: { issueTypes, origins, issueSources } });
+    return res.status(200).json({
+      success: true,
+      data: { issueTypes, origins, issueSources, priorities, complaintTypes },
+    });
   } catch (error) {
     return next(AppError.internalServerError(error.message || "Failed to fetch dropdown lookups"));
   }
