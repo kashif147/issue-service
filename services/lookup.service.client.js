@@ -15,7 +15,12 @@ const USER_SERVICE_URL =
   process.env.USER_SERVICE_URL || process.env.POLICY_SERVICE_URL || "http://user-service:5001";
 
 const LOOKUP_TYPE_CACHE_TTL_MS = 5 * 60 * 1000;
-const lookupTypeIdCache = new Map(); // code -> { id, expiry }
+// Short negative-cache TTL for a failed/unreachable resolution, so a struggling user-service
+// doesn't get hit with a fresh GET /api/lookuptype on every single dropdown load while it's
+// down - each of the 4 lookup endpoints (issue-types/issue-statuses/origins/issue-sources)
+// resolves at least one type code per call, so without this a bad patch of requests compounds.
+const LOOKUP_TYPE_FAILURE_CACHE_TTL_MS = 15 * 1000;
+const lookupTypeIdCache = new Map(); // code -> { id, expiry } | { failed: true, expiry }
 
 const normalizeKey = (value) =>
   String(value || "")
@@ -60,41 +65,60 @@ function unwrapLookupPayload(payload) {
 async function getLookupTypeIdByCode(code, headers) {
   const cached = lookupTypeIdCache.get(code);
   if (cached && Date.now() < cached.expiry) {
-    return cached.id;
+    return cached.failed ? null : cached.id;
   }
 
-  const base = USER_SERVICE_URL.replace(/\/$/, "");
-  const response = await axios.get(`${base}/api/lookuptype`, {
-    headers,
-    timeout: 8000,
-    validateStatus: (status) => status < 500,
-  });
+  try {
+    const base = USER_SERVICE_URL.replace(/\/$/, "");
+    const response = await axios.get(`${base}/api/lookuptype`, {
+      headers,
+      timeout: 8000,
+      validateStatus: (status) => status < 500,
+    });
 
-  if (response.status < 200 || response.status >= 300) return null;
+    if (response.status < 200 || response.status >= 300) {
+      lookupTypeIdCache.set(code, { failed: true, expiry: Date.now() + LOOKUP_TYPE_FAILURE_CACHE_TTL_MS });
+      return null;
+    }
 
-  const types = Array.isArray(response.data) ? response.data : response.data?.data || [];
-  const match = types.find((type) => type?.code === code);
-  if (!match?._id) return null;
+    const types = Array.isArray(response.data) ? response.data : response.data?.data || [];
+    const match = types.find((type) => type?.code === code);
+    if (!match?._id) {
+      lookupTypeIdCache.set(code, { failed: true, expiry: Date.now() + LOOKUP_TYPE_FAILURE_CACHE_TTL_MS });
+      return null;
+    }
 
-  lookupTypeIdCache.set(code, { id: String(match._id), expiry: Date.now() + LOOKUP_TYPE_CACHE_TTL_MS });
-  return String(match._id);
+    lookupTypeIdCache.set(code, { id: String(match._id), expiry: Date.now() + LOOKUP_TYPE_CACHE_TTL_MS });
+    return String(match._id);
+  } catch (error) {
+    // Network error/timeout reaching user-service - short negative-cache rather than
+    // propagating, so callers get a clean empty result and the next attempt is rate-limited.
+    lookupTypeIdCache.set(code, { failed: true, expiry: Date.now() + LOOKUP_TYPE_FAILURE_CACHE_TTL_MS });
+    return null;
+  }
 }
 
 async function fetchLookupsByTypeCode(code, headers) {
   const typeId = await getLookupTypeIdByCode(code, headers);
   if (!typeId) return [];
 
-  const base = USER_SERVICE_URL.replace(/\/$/, "");
-  const response = await axios.get(`${base}/api/lookup/by-type/${typeId}/hierarchy`, {
-    headers,
-    timeout: 15000,
-    validateStatus: (status) => status < 500,
-  });
+  try {
+    const base = USER_SERVICE_URL.replace(/\/$/, "");
+    const response = await axios.get(`${base}/api/lookup/by-type/${typeId}/hierarchy`, {
+      headers,
+      timeout: 15000,
+      validateStatus: (status) => status < 500,
+    });
 
-  if (response.status < 200 || response.status >= 300) return [];
+    if (response.status < 200 || response.status >= 300) return [];
 
-  const results = Array.isArray(response.data?.results) ? response.data.results : [];
-  return results.map(unwrapLookupPayload);
+    const results = Array.isArray(response.data?.results) ? response.data.results : [];
+    return results.map(unwrapLookupPayload);
+  } catch (error) {
+    // Network error/timeout reaching user-service - degrade to an empty list rather than
+    // propagating, matching getLookupTypeIdByCode's failure handling above.
+    return [];
+  }
 }
 
 async function fetchLookupById(id, headers) {
