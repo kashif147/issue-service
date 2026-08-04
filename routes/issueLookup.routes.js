@@ -16,5 +16,15 @@ router.get(
   defaultPolicyMiddleware.requirePermission("issues", "read"),
   issueLookupController.listIssueStatuses,
 );
+router.get(
+  "/origins",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueLookupController.listOrigins,
+);
+router.get(
+  "/issue-sources",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueLookupController.listIssueSources,
+);
 
 module.exports = router;

@@ -31,4 +31,24 @@ async function listIssueStatuses(req, res, next) {
   }
 }
 
-module.exports = { listIssueTypes, listIssueStatuses };
+async function listOrigins(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const origins = await lookupServiceClient.fetchOrigins({ req, tenantId });
+    return res.status(200).json({ success: true, data: origins });
+  } catch (error) {
+    return next(AppError.internalServerError(error.message || "Failed to fetch origins"));
+  }
+}
+
+async function listIssueSources(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const issueSources = await lookupServiceClient.fetchIssueSources({ req, tenantId });
+    return res.status(200).json({ success: true, data: issueSources });
+  } catch (error) {
+    return next(AppError.internalServerError(error.message || "Failed to fetch issue sources"));
+  }
+}
+
+module.exports = { listIssueTypes, listIssueStatuses, listOrigins, listIssueSources };

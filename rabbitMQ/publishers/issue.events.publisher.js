@@ -56,7 +56,7 @@ function issueSummaryPayload(issue) {
 }
 
 /** issues.issue.created.v1 - also drives communication-service's member-acknowledgement
- * email (filtered on issueSource === "MEMBER" there, not a separate event - plan §1.4). */
+ * email (filtered on issueSource === "MEMBER-IS" there, not a separate event - plan §1.4). */
 async function publishIssueCreated(issue) {
   return publishDomainEvent(ROUTING_KEYS.ISSUE_CREATED, issueSummaryPayload(issue), {
     tenantId: issue.tenantId,

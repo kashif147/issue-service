@@ -167,18 +167,45 @@ async function searchIssueDesignations(query, { req, tenantId } = {}) {
   }));
 }
 
+function toOptionList(lookups) {
+  return lookups.map((lookup) => ({
+    id: lookup?._id || null,
+    code: lookup?.code || null,
+    displayName: lookup?.DisplayName || lookup?.lookupname || null,
+  }));
+}
+
+/** Flat (no parent filtering) option list for a given LookupType code. */
+async function fetchFlatLookupOptions(lookupTypeCode, { req, tenantId } = {}) {
+  const headers = buildHeaders(req, tenantId);
+  const lookups = await fetchLookupsByTypeCode(lookupTypeCode, headers);
+  return toOptionList(lookups);
+}
+
 /**
  * Issue Type options (LookupType code "ISST") for the Create/Edit Cases dropdown - replaces
  * the formerly-hardcoded ISSUE_TYPES constant. Flat list, no parent filtering.
  */
 async function fetchIssueTypes({ req, tenantId } = {}) {
-  const headers = buildHeaders(req, tenantId);
-  const types = await fetchLookupsByTypeCode("ISST", headers);
-  return types.map((lookup) => ({
-    id: lookup?._id || null,
-    code: lookup?.code || null,
-    displayName: lookup?.DisplayName || lookup?.lookupname || null,
-  }));
+  return fetchFlatLookupOptions("ISST", { req, tenantId });
+}
+
+/**
+ * Origin options (LookupType code "ORIGIN") for the Create/Edit Cases dropdown - replaces
+ * the formerly-hardcoded ORIGINS constant. Flat list, no issue-type dependency (unlike
+ * Issue Status).
+ */
+async function fetchOrigins({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("ORIGIN", { req, tenantId });
+}
+
+/**
+ * Issue Source options (LookupType code "ISSUESRC") for the Create/Edit Cases dropdown -
+ * replaces the formerly-hardcoded ISSUE_SOURCES constant. Flat list, no issue-type
+ * dependency (unlike Issue Status).
+ */
+async function fetchIssueSources({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("ISSUESRC", { req, tenantId });
 }
 
 /**
@@ -201,13 +228,7 @@ async function fetchIssueStatuses(issueTypeCode, { req, tenantId } = {}) {
   if (!matchedType?._id) return [];
 
   const parentId = normalizeKey(matchedType._id);
-  return statuses
-    .filter((lookup) => normalizeKey(lookup?.Parentlookupid) === parentId)
-    .map((lookup) => ({
-      id: lookup?._id || null,
-      code: lookup?.code || null,
-      displayName: lookup?.DisplayName || lookup?.lookupname || null,
-    }));
+  return toOptionList(statuses.filter((lookup) => normalizeKey(lookup?.Parentlookupid) === parentId));
 }
 
 module.exports = {
@@ -217,4 +238,6 @@ module.exports = {
   searchIssueDesignations,
   fetchIssueTypes,
   fetchIssueStatuses,
+  fetchOrigins,
+  fetchIssueSources,
 };

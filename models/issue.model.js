@@ -25,26 +25,24 @@ const ISSUE_STATUSES = [
   "CLOSED",
 ];
 
-const ISSUE_SOURCES = [
-  "MEMBER",
-  "PA",
-  "OFFICIAL",
-  "INFORMATION_DEPT",
-  "EXECUTIVE_COUNCIL",
-  "SENIOR_MANAGEMENT",
-  "OTHER",
-];
+// Codes match user-service's Lookup values under LookupType "ISSUESRC" exactly (including
+// the "OFFICAL-IS" typo in the seeded data) - the frontend dropdown is sourced live from
+// that lookup (see hooks/useIssueLookups.js in the frontend app), so these enums must stay
+// in lockstep with whatever codes are seeded there.
+const ISSUE_SOURCES = ["MEMBER-IS", "PA-IS", "OFFICAL-IS", "INFODPT-IS", "EC-IS", "SM-IS", "OTHR-IS"];
 
+// Codes match user-service's Lookup values under LookupType "ORIGIN" exactly - see the
+// ISSUE_SOURCES comment above.
 const ORIGINS = [
-  "PHONE",
-  "EMAIL",
-  "PORTAL",
-  "IN_PERSON",
-  "REFERRED_BY_EC",
-  "REPRESENTATIVE",
-  "DIRECT_CALL_TO_OFFICIAL",
-  "LETTER",
-  "SOCIAL_MEDIA",
+  "PHONE-O",
+  "EMAIL-O",
+  "PORTAL-O",
+  "INPERSON-O",
+  "RBEC-O",
+  "REP-O",
+  "DCTO-O",
+  "LETTER-O",
+  "SOCMED-O",
 ];
 
 const OWNER_TEAMS = ["COMPLAINTS", "FTP", "IR", "DATA_PROTECTION"];
