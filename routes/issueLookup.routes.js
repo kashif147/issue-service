@@ -33,5 +33,10 @@ router.get(
   defaultPolicyMiddleware.requirePermission("issues", "read"),
   issueLookupController.listIssueSources,
 );
+router.get(
+  "/resolutions",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueLookupController.listResolutions,
+);
 
 module.exports = router;

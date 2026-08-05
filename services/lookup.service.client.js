@@ -265,6 +265,15 @@ async function fetchIssueStatuses(issueTypeCode, options = {}) {
 }
 
 /**
+ * All Issue Status options (LookupType code "ISSUSTATUS"), unscoped by Issue Type - for the
+ * Issues grid's "Case Status" toolbar filter, which spans every issue type at once rather
+ * than a single selected one (unlike Create/Edit's per-type fetchIssueStatuses above).
+ */
+async function fetchAllIssueStatuses({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("ISSUSTATUS", { req, tenantId });
+}
+
+/**
  * Priority options (LookupType code "PRIORITY") - flat, no parent filtering. Codes
  * (LOW/MEDIUM/HIGH) already match the backend's PRIORITIES enum exactly, no rename needed.
  */
@@ -282,6 +291,39 @@ async function fetchComplaintTypes({ req, tenantId } = {}) {
   return fetchLookupsScopedToIssueType("CMPLNTYPE", "COMPLAINT", { req, tenantId });
 }
 
+/**
+ * Criteria Letter Status options (LookupType code "CLS") - flat, no parent filtering. FTP-only
+ * field.
+ */
+async function fetchCriteriaLetterStatuses({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("CLS", { req, tenantId });
+}
+
+/**
+ * Legislation options (LookupType code "LEGISLATON") - flat, no parent filtering. FTP-only
+ * field.
+ */
+async function fetchLegislations({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("LEGISLATON", { req, tenantId });
+}
+
+/**
+ * Case Type options (LookupType code "CASETYPE") - flat, no parent filtering. IR-only field.
+ */
+async function fetchCaseTypes({ req, tenantId } = {}) {
+  return fetchFlatLookupOptions("CASETYPE", { req, tenantId });
+}
+
+/**
+ * Resolution options (LookupType code "RESOLUTON") for a given Issue Type - each value is a
+ * child of its Issue Type's Lookup value (currently only seeded under FTP and IR), same
+ * dependency mechanism as Issue Status - varies per issueTypeCode, so this can't join the
+ * flat batch in listDropdownLookups and stays its own endpoint.
+ */
+async function fetchResolutions(issueTypeCode, options = {}) {
+  return fetchLookupsScopedToIssueType("RESOLUTON", issueTypeCode, options);
+}
+
 module.exports = {
   buildHeaders,
   fetchLookupsByTypeCode,
@@ -293,4 +335,9 @@ module.exports = {
   fetchIssueSources,
   fetchPriorities,
   fetchComplaintTypes,
+  fetchCriteriaLetterStatuses,
+  fetchLegislations,
+  fetchCaseTypes,
+  fetchResolutions,
+  fetchAllIssueStatuses,
 };

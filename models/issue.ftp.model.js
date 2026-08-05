@@ -1,9 +1,13 @@
 const mongoose = require("mongoose");
 const Issue = require("./issue.model");
 
+// CRITERIA_LETTER_STATUSES codes match user-service's Lookup values under LookupType "CLS"
+// exactly. LEGISLATIONS codes match LookupType "LEGISLATON" exactly - see
+// models/issue.model.js's ISSUE_SOURCES comment for why these stay in lockstep with the
+// live-lookup-driven dropdown (hooks/useIssueLookups.js in the frontend app).
 const CRITERIA_LETTER_STATUSES = ["PENDING", "SENT", "RECEIVED"];
 const SOLICITORS = ["O_CONNORS", "OTHER"];
-const LEGISLATIONS = ["S55_1_I", "S58", "S55_PPC", "S55_INQUIRY"];
+const LEGISLATIONS = ["SEC55I", "SEC58", "SEC55PPC", "SEC58INQ"];
 
 const FtpSchema = new mongoose.Schema({
   aragReferenceNo: { type: String, default: null },

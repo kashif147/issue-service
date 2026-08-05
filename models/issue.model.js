@@ -47,18 +47,24 @@ const ORIGINS = [
 
 const OWNER_TEAMS = ["COMPLAINTS", "FTP", "IR", "DATA_PROTECTION"];
 
+// Codes match user-service's Lookup values under LookupType "RESOLUTON" exactly - see the
+// ISSUE_SOURCES comment above. Unlike ISSUE_SOURCES/ORIGINS, Resolution's Lookup values are
+// hierarchical (each is a child of a specific Issue Type's Lookup value, currently only
+// seeded under FTP and IR) - the dropdown options are scoped per issue type at fetch time
+// (services/lookup.service.client.js's fetchResolutions), but this base-schema enum stays a
+// flat union of every valid code, same as ISSUE_STATUSES.
 const RESOLUTIONS = [
-  "SECTION_55_PROCEEDING_TO_INQUIRY",
-  "NO_CASE_FOUND_AT_PPC",
-  "CONSENT_AND_UNDERTAKING_AT_PPC_CLOSED_FOLLOWING_INQUIRY",
-  "CAME_OFF_RECORD",
-  "S58_MOVING_TO_S55",
-  "LOCAL_LEVEL",
-  "NO_FURTHER_CONTACT_FROM_MEMBER",
-  "WITH_EMPLOYER",
-  "WITH_THIRD_PARTY",
-  "OTHER",
-  "CLOSED",
+  "SEC55PTI",
+  "NCFAPPC",
+  "CAUAPPCCFI",
+  "COR",
+  "SEC58-55",
+  "LL",
+  "NFCFM",
+  "WE",
+  "WTP",
+  "OTHR",
+  "CLSD",
 ];
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH"];

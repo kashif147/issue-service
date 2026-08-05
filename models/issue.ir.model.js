@@ -5,7 +5,9 @@ const Issue = require("./issue.model");
 // national issues can be captured against the correct members" line (Logging an Issue
 // intro) and the "Members: Grid of contacts, to be used if IR Case Type = Group" line
 // (Industrial Relations field list) - the field the Members grid's visibility depends on.
-const CASE_TYPES = ["INDIVIDUAL", "GROUP", "NATIONAL"];
+// Codes match user-service's Lookup values under LookupType "CASETYPE" exactly (INDV, not
+// INDIVIDUAL) - see models/issue.model.js's ISSUE_SOURCES comment.
+const CASE_TYPES = ["INDV", "GROUP", "NATIONAL"];
 
 const IrSchema = new mongoose.Schema({
   // Unique, format "YY-{initials}-{6digit}" - see services/referenceNumberGenerator.js.
@@ -13,7 +15,7 @@ const IrSchema = new mongoose.Schema({
 
   // Drives whether the frontend's Members grid (multi-contact) is shown vs a single member
   // link - see CASE_TYPES comment above.
-  caseType: { type: String, enum: CASE_TYPES, default: "INDIVIDUAL" },
+  caseType: { type: String, enum: CASE_TYPES, default: "INDV" },
 
   correspondenceWithExternalParty: { type: Boolean, default: false },
 
