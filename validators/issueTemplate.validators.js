@@ -6,7 +6,19 @@ const { AppError } = require("../errors/AppError");
 // filterUtils.js), which is explicitly out of scope for this backend slice. Hardcoding a
 // key allowlist here ahead of that frontend work risks rejecting legitimate keys the
 // frontend introduces later. Structural validation (operator/shape) still applies.
-const ISSUE_TEMPLATE_TYPES = ["issuessummary"];
+// One templateType per Issue Management grid page - each of the 6 routes sharing
+// CasesSummary.js (Open, Closed, Complaints, Fitness to Practice, Industrial Relations,
+// Data Protection) now has its own independent Save-View template rather than one shared
+// bucket. "issuessummary" is kept (not renamed) for the Open/default view specifically,
+// since a real pre-existing user template already used that exact value.
+const ISSUE_TEMPLATE_TYPES = [
+  "issuessummary",
+  "issuesclosed",
+  "issuescomplaints",
+  "issuesftp",
+  "issuesir",
+  "issuesdataprotection",
+];
 
 const FILTER_OPERATOR = {
   EQUAL_TO: "equal_to",
