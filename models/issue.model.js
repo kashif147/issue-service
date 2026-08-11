@@ -90,6 +90,9 @@ const IssueSchema = new mongoose.Schema(
     dateReceived: { type: Date, default: null },
     dateResolved: { type: Date, default: null },
     description: { type: String, default: null },
+    // Free-text availability notes, common to all 4 issue types (base schema field, same
+    // reasoning as description above).
+    availability: { type: String, default: null },
 
     issueSource: { type: String, enum: ISSUE_SOURCES, default: null },
     issueSourceOther: { type: String, default: null },
