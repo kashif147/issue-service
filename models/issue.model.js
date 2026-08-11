@@ -82,12 +82,15 @@ const IssueSchema = new mongoose.Schema(
     // Auto-set as "{contactName} {internalReferenceNumber}" - see services/issue.service.js.
     caseTitle: { type: String, default: null },
 
-    issueStatus: { type: String, enum: ISSUE_STATUSES, default: "ACTIVE" },
+    issueStatus: { type: String, enum: ISSUE_STATUSES, default: "ACTIVE", required: true },
     issueStatusOther: { type: String, maxlength: 45, default: null },
 
     createdBy: { type: String, default: null },
     createdOn: { type: Date, default: Date.now },
-    dateReceived: { type: Date, default: null },
+    // Common/mandatory field (frontend CreateCasesDrawer.jsx's "Date Received", required
+    // for every issue type) - see the ownerRequiredExceptIr pre-validate hook below for why
+    // owner.userId isn't declared required the same way.
+    dateReceived: { type: Date, required: true },
     dateResolved: { type: Date, default: null },
     description: { type: String, default: null },
     // Free-text availability notes, common to all 4 issue types (base schema field, same
@@ -106,10 +109,13 @@ const IssueSchema = new mongoose.Schema(
     // (see no-cross-db-mongo rule / cross-service-auth skill).
     groupId: { type: String, default: null },
 
-    origin: { type: String, enum: ORIGINS, default: null },
+    // Common/mandatory field (frontend CreateCasesDrawer.jsx's "Origin"), required for
+    // every issue type.
+    origin: { type: String, enum: ORIGINS, required: true },
 
     owner: {
       team: { type: String, enum: OWNER_TEAMS, default: null },
+      // Mandatory for every issue type except IR - see ownerRequiredExceptIr below.
       userId: { type: String, default: null },
     },
 
@@ -154,6 +160,18 @@ IssueSchema.index({ tenantId: 1, internalReferenceNumber: 1 }, { unique: true, s
 IssueSchema.pre("validate", function issueStatusOtherRequired(next) {
   if (this.issueStatus === "OTHER" && !this.issueStatusOther) {
     return next(new Error("issueStatusOther is required when issueStatus is OTHER"));
+  }
+  next();
+});
+
+// Owner (User Id) required for every issue type except IR: IR auto-resolves owner.userId
+// to the primary member's IRO (services/issue.service.js#autoRouteOwner, run before
+// issue.save() in prepareNewIssue) and, per the plan, deliberately leaves it null rather
+// than failing the create if that lookup has no match - a plain `required: true` on the
+// field itself would break that documented fallback.
+IssueSchema.pre("validate", function ownerRequiredExceptIr(next) {
+  if (this.issueType !== "IR" && !this.owner?.userId) {
+    return next(new Error("owner.userId is required"));
   }
   next();
 });

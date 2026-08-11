@@ -22,7 +22,7 @@ const ComplaintSchema = new mongoose.Schema({
   // Auto-set as "Contact Name + Internal Reference No" - see services/issue.service.js.
   complainant: { type: String, default: null },
 
-  complaintType: { type: String, enum: COMPLAINT_TYPES, default: null },
+  complaintType: { type: String, enum: COMPLAINT_TYPES, required: true },
 
   externalSolicitorInvolved: { type: Boolean, default: false },
   solicitor: { type: String, enum: SOLICITORS, default: null },
@@ -44,6 +44,17 @@ const ComplaintSchema = new mongoose.Schema({
 ComplaintSchema.pre("validate", function serviceProviderRequiredForMemberOnServiceProvider(next) {
   if (this.complaintType === "MOSP" && !this.serviceProvider) {
     return next(new Error("serviceProvider is required when complaintType is MOSP"));
+  }
+  next();
+});
+
+// Required only when complaintType === "MOM" (Member On Member) - `complainant` itself is
+// auto-derived from memberIds[0] (assignAutoTitles in services/issue.service.js, run before
+// issue.save()), so the real caller-supplied input to validate is memberIds, not the
+// complainant string.
+ComplaintSchema.pre("validate", function complainantRequiredForMemberOnMember(next) {
+  if (this.complaintType === "MOM" && (!Array.isArray(this.memberIds) || this.memberIds.length === 0)) {
+    return next(new Error("A complainant (Related Member) is required when complaintType is Member On Member"));
   }
   next();
 });

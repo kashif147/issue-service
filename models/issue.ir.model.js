@@ -23,7 +23,7 @@ const IrSchema = new mongoose.Schema({
   // system (LookupType code "ISSUEDESG"), per the plan. This stores that Lookup's _id as a
   // plain String, resolved read-only via services/lookup.service.client.js (owned by a
   // separate parallel workstream - see that file's own note once it lands).
-  issueDesignation: { type: String, default: null },
+  issueDesignation: { type: String, required: true },
 
   resolvedByUserId: { type: String, default: null },
   membershipVerified: { type: Boolean, default: false },
@@ -37,7 +37,16 @@ const IrSchema = new mongoose.Schema({
   wrcCaseNumber: { type: String, default: null },
 });
 
-IrSchema.index({ tenantId: 1, caseFileNumber: 1 }, { unique: true, sparse: true });
+// A plain `sparse: true` compound index still indexes {tenantId, caseFileNumber: null}
+// for every non-IR issue (COMPLAINT/FTP/DP never set caseFileNumber) because sparse only
+// excludes a document when *every* indexed field is missing, and tenantId is always
+// present - so the second complaint for a tenant collided on {tenantId, null}. A partial
+// index scoped to "caseFileNumber is actually a string" only applies uniqueness to IR
+// documents that have one, which is what this was meant to enforce.
+IrSchema.index(
+  { tenantId: 1, caseFileNumber: 1 },
+  { unique: true, partialFilterExpression: { caseFileNumber: { $type: "string" } } },
+);
 
 const Ir = Issue.discriminator("IR", IrSchema);
 
