@@ -18,7 +18,7 @@ function hasTeamReadPermission(req, issueType) {
   const resource = issueService.teamResourceForIssueType(issueType);
   if (!resource) return false;
   const permissions = req.ctx?.permissions || [];
-  return permissions.includes(`${resource}:read`);
+  return issueService.hasPermission(permissions, `${resource}:read`);
 }
 
 async function createActivity(req, res, next) {

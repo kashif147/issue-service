@@ -23,6 +23,19 @@ function teamResourceForIssueType(issueType) {
 }
 
 /**
+ * user-service's getUserPermissions collapses a Super User's permissions to the literal
+ * wildcard ["*"] rather than every canonical `resource:action` string (see
+ * handlers/role.handler.js there) - every permission check across user-service's own PDP
+ * (services/policyEvaluationService.js) treats "*" as "matches anything", so any code here
+ * doing a literal permissions.includes(`${resource}:action`) check must do the same or an
+ * SU (or any other caller whose effective permissions are "*") gets silently treated as
+ * having none of them.
+ */
+function hasPermission(permissions, required) {
+  return permissions.includes(required) || permissions.includes("*");
+}
+
+/**
  * Which issueTypes the caller may see, derived from which issues-<team>:read resources are
  * present in req.ctx.permissions - never trust the frontend to only request one type (plan
  * §1.2). Callers must always AND this into every list/detail query via
@@ -31,7 +44,7 @@ function teamResourceForIssueType(issueType) {
 function getAllowedIssueTypes(req) {
   const permissions = req?.ctx?.permissions || [];
   return Object.entries(TEAM_RESOURCE_BY_ISSUE_TYPE)
-    .filter(([, resource]) => permissions.includes(`${resource}:read`))
+    .filter(([, resource]) => hasPermission(permissions, `${resource}:read`))
     .map(([issueType]) => issueType);
 }
 
@@ -45,7 +58,7 @@ function hasTeamWritePermission(req, issueType) {
   const resource = teamResourceForIssueType(issueType);
   if (!resource) return false;
   const permissions = req?.ctx?.permissions || [];
-  return permissions.includes(`${resource}:write`);
+  return hasPermission(permissions, `${resource}:write`);
 }
 
 /**
@@ -182,6 +195,7 @@ module.exports = {
   OWNER_TEAM_BY_ISSUE_TYPE,
   TEAM_RESOURCE_BY_ISSUE_TYPE,
   teamResourceForIssueType,
+  hasPermission,
   getAllowedIssueTypes,
   hasTeamWritePermission,
   withComplaintHideFilter,
