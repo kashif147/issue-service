@@ -11,8 +11,17 @@ const mongoose = require("mongoose");
 // dropdowns each include an "Other" option with a companion textbox.
 const ISSUE_TYPES = ["COMPLAINT", "FTP", "IR", "DP"];
 
+// Issue Status is Lookup-driven per issueType (LookupType code "ISSUSTATUS", scoped to the
+// issue type via the Lookup hierarchy - see issue-service/services/lookup.service.client.js's
+// fetchIssueStatuses and hooks/useIssueLookups.js's useIssueStatusOptions in the frontend
+// app), so each type has its own "Active" code sharing the same display label rather than
+// one shared "ACTIVE" (see frontend/.../context/FilterContext.js's issueFilterCodeMaps
+// comment) - this enum must stay a flat union of every type's codes, same as RESOLUTIONS.
 const ISSUE_STATUSES = [
   "ACTIVE",
+  "ACTIVE-FTP",
+  "ACTIVE-IR",
+  "ACTIVE-DP",
   "ACTIVE_BEFORE_BOARD",
   "ACTIVE_INQUIRY",
   "ACTIVE_PPC",
