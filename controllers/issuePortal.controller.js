@@ -55,6 +55,51 @@ async function resolveMyProfileOrThrow(req, tenantId) {
   return my;
 }
 
+function candidateSummary(profile) {
+  const forename = profile?.personalInfo?.forename || "";
+  const surname = profile?.personalInfo?.surname || "";
+  return {
+    profileId: String(profile._id),
+    name: [forename, surname].filter(Boolean).join(" ") || null,
+    membershipNumber: profile?.membershipNumber || null,
+  };
+}
+
+/**
+ * A MOM complaint's related member, accepted either as an already-resolved
+ * relatedMemberId (a profile-service profileId - what a search-and-select UI would send)
+ * or a free-text relatedMember name/membership-number/etc. (whatever a caller types,
+ * resolved server-side via profileServiceClient.searchProfiles - the same search
+ * CRM's own "Find Issues"/member-link pickers use). relatedMemberId always wins if both are
+ * present. Throws a 400 AppError - with a `candidates` array attached for the ambiguous
+ * case, so a caller can show a disambiguation list - rather than silently guessing which
+ * "Kashif Khan" was meant.
+ */
+async function resolveRelatedMemberId(body, { req, tenantId, myProfileId }) {
+  if (body.relatedMemberId) return String(body.relatedMemberId);
+
+  const query = String(body.relatedMember || "").trim();
+  if (!query) {
+    throw AppError.badRequest(
+      "relatedMemberId (or relatedMember, a name/membership number to search for) is required when complaintType is MOM",
+    );
+  }
+
+  const results = await profileServiceClient.searchProfiles(query, { req, tenantId });
+  const matches = (results || []).filter((profile) => String(profile._id) !== String(myProfileId));
+
+  if (matches.length === 0) {
+    throw AppError.badRequest(`No member found matching "${query}"`);
+  }
+  if (matches.length > 1) {
+    throw AppError.badRequest(
+      `Multiple members match "${query}" - please provide a membership number or more specific name`,
+      { candidates: matches.slice(0, 10).map(candidateSummary) },
+    );
+  }
+  return String(matches[0]._id);
+}
+
 /** Own-issue lookup, shared by every portal read/write handler below - 404, never 403, on
  * no match (matches this service's existing hidden-doc convention, e.g.
  * withComplaintHideFilter's doc comment in services/issue.service.js), so a member can never
@@ -85,13 +130,12 @@ async function portalCreateIssue(req, res, next) {
 
     const memberIds = [my.profileId];
     if (body.complaintType === "MOM") {
-      const relatedMemberId = body.relatedMemberId;
-      if (!relatedMemberId) {
-        return next(
-          AppError.badRequest("relatedMemberId is required when complaintType is MOM"),
-        );
-      }
-      if (String(relatedMemberId) === String(my.profileId)) {
+      const relatedMemberId = await resolveRelatedMemberId(body, {
+        req,
+        tenantId,
+        myProfileId: my.profileId,
+      });
+      if (relatedMemberId === String(my.profileId)) {
         return next(
           AppError.badRequest("You cannot file a Member on Member complaint about yourself"),
         );
