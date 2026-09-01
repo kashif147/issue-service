@@ -284,7 +284,13 @@ async function portalDownloadAttachment(req, res, next) {
     const url = getDownloadSasUrl(attachment.blobPath, 15);
     if (!url) return next(AppError.serviceUnavailable("Attachment storage is not configured"));
 
-    return res.redirect(url);
+    // JSON, not res.redirect() - see issueActivity.controller.js#downloadAttachment's
+    // comment: this route needs an Authorization header the browser wouldn't send on a
+    // plain redirect-follow.
+    return res.status(200).json({
+      success: true,
+      data: { url, filename: attachment.filename, contentType: attachment.contentType },
+    });
   } catch (error) {
     if (error instanceof AppError) return next(error);
     if (error.name === "CastError") return next(AppError.notFound("Issue not found"));

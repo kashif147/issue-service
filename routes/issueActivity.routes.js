@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const issueActivityController = require("../controllers/issueActivity.controller.js");
 const { defaultPolicyMiddleware } = require("../middlewares/policy.middleware.js");
+const { upload } = require("../middlewares/upload.mw.js");
 
 // Mounted at "/" (see routes/index.js) so this file owns both the /issues/:id/activities
 // nested path and the flat /activities/:activityId path, exactly as listed in the plan
@@ -27,6 +28,17 @@ router.get(
   "/activities/:activityId/attachments/:index/download",
   defaultPolicyMiddleware.requirePermission("issues", "read"),
   issueActivityController.downloadAttachment,
+);
+router.post(
+  "/issues/:id/attachments",
+  defaultPolicyMiddleware.requirePermission("issues", "write"),
+  upload.single("file"),
+  issueActivityController.uploadIssueAttachment,
+);
+router.get(
+  "/issues/:id/attachments",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueActivityController.listIssueAttachments,
 );
 
 module.exports = router;

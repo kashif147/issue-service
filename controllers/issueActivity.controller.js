@@ -2,7 +2,11 @@ const Issue = require("../models/issue.model");
 const Activity = require("../models/activity.model");
 const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
-const { getDownloadSasUrl } = require("../services/azure.blob.service");
+const {
+  uploadToBlob,
+  getDownloadSasUrl,
+  buildIssueAttachmentBlobPath,
+} = require("../services/azure.blob.service");
 
 /** The parent Issue, subject to the same team-visibility + complaint-hide filters as issue.controller.js. */
 async function loadParentIssue(req, issueId) {
@@ -22,6 +26,25 @@ function hasTeamReadPermission(req, issueType) {
   return issueService.hasPermission(permissions, `${resource}:read`);
 }
 
+/**
+ * The frontend's activity body is ReactQuill rich text - its "empty" state is HTML like
+ * "<p><br></p>", not "" - so a plain truthiness/trim check on the raw string would let an
+ * empty-looking activity through. Strips tags before checking for real content, mirroring
+ * CasesDetails.js's own stripHtml() used client-side for the same reason.
+ */
+function hasMeaningfulText(html) {
+  return String(html || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim().length > 0;
+}
+
+/** Same rule the portal side already enforces (controllers/issuePortal.controller.js's
+ * portalAddIssueComment) - a closed issue is done, so no new activity/attachment should be
+ * addable to it from either side of the app. */
+function assertIssueNotClosed(issue) {
+  if (issue.issueStatus === "CLOSED") {
+    throw AppError.badRequest("Cannot add an activity to a closed issue");
+  }
+}
+
 async function createActivity(req, res, next) {
   try {
     const { tenantId, userId } = req.ctx;
@@ -32,9 +55,14 @@ async function createActivity(req, res, next) {
       return next(AppError.forbidden("Not permitted to log activities for issues of this type"));
     }
 
+    assertIssueNotClosed(issue);
+
     const body = req.body || {};
     if (!body.activityType) {
       return next(AppError.badRequest("activityType is required"));
+    }
+    if (!hasMeaningfulText(body.body)) {
+      return next(AppError.badRequest("Activity text is required"));
     }
 
     const activity = await Activity.create({
@@ -58,6 +86,7 @@ async function createActivity(req, res, next) {
 
     return res.status(201).json({ success: true, data: activity });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     if (error.name === "ValidationError") {
       return next(AppError.badRequest(error.message));
     }
@@ -144,10 +173,123 @@ async function downloadAttachment(req, res, next) {
     const url = getDownloadSasUrl(attachment.blobPath, 15);
     if (!url) return next(AppError.serviceUnavailable("Attachment storage is not configured"));
 
-    return res.redirect(url);
+    // JSON, not res.redirect() - this route sits behind requirePermission (needs the
+    // caller's JWT in an Authorization header), which a plain browser navigation/<a href>
+    // following a 302 wouldn't send. The frontend fetches this via an authenticated axios
+    // call, then opens the returned (self-authenticating, short-lived) SAS url directly -
+    // that second hop needs no Authorization header of its own.
+    return res.status(200).json({
+      success: true,
+      data: { url, filename: attachment.filename, contentType: attachment.contentType },
+    });
   } catch (error) {
     if (error.name === "CastError") return next(AppError.notFound("Attachment not found"));
     return next(AppError.internalServerError(error.message || "Failed to download attachment"));
+  }
+}
+
+/**
+ * CRM's "Attachments" panel (CasesDetails.js) is a flat list of documents on the issue, not
+ * tied to a specific logged activity/comment - there's no separate Issue-level document
+ * model though, so this stores the file the same way portalAddIssueComment does (an Activity
+ * carrying just an attachment, no text) and lists across every activity's attachments
+ * rather than adding a new schema. sendNotification defaults false here (unlike
+ * createActivity's true) - a plain document upload isn't necessarily something the owner
+ * needs pinged about the way a logged call/note is.
+ */
+async function uploadIssueAttachment(req, res, next) {
+  try {
+    const { tenantId, userId } = req.ctx;
+    const issue = await loadParentIssue(req, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    if (!issueService.hasTeamWritePermission(req, issue.issueType)) {
+      return next(AppError.forbidden("Not permitted to upload attachments for issues of this type"));
+    }
+
+    assertIssueNotClosed(issue);
+
+    if (!req.file) {
+      return next(AppError.badRequest("A file is required"));
+    }
+
+    const blobPath = buildIssueAttachmentBlobPath(tenantId, issue._id, req.file.originalname);
+    await uploadToBlob(blobPath, req.file.buffer, req.file.mimetype, req.file.originalname);
+
+    const activity = await Activity.create({
+      tenantId,
+      issueId: issue._id,
+      activityType: "NOTE",
+      body: null,
+      createdBy: userId,
+      sendNotification: false,
+      visibleToMember: false,
+      attachments: [
+        {
+          filename: req.file.originalname,
+          blobPath,
+          contentType: req.file.mimetype,
+          size: req.file.size,
+        },
+      ],
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        activityId: activity._id,
+        index: 0,
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+        size: req.file.size,
+        uploadedAt: activity.createdAt,
+        uploadedBy: userId,
+      },
+    });
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    if (error.name === "ValidationError") return next(AppError.badRequest(error.message));
+    return next(AppError.internalServerError(error.message || "Failed to upload attachment"));
+  }
+}
+
+/** Flattens every activity's attachments on this issue into one list, newest activity
+ * first - the data source for CRM's "Attachments" panel (which previously rendered two
+ * hardcoded mock files with no backend behind them at all). */
+async function listIssueAttachments(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const issue = await loadParentIssue(req, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    if (!hasTeamReadPermission(req, issue.issueType)) {
+      return next(AppError.forbidden("Not permitted to view attachments for issues of this type"));
+    }
+
+    const activities = await Activity.find({
+      tenantId,
+      issueId: issue._id,
+      "attachments.0": { $exists: true },
+    }).sort({ createdAt: -1 });
+
+    const attachments = [];
+    activities.forEach((activity) => {
+      (activity.attachments || []).forEach((attachment, index) => {
+        attachments.push({
+          activityId: activity._id,
+          index,
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          size: attachment.size,
+          uploadedAt: activity.createdAt,
+          uploadedBy: activity.createdBy,
+        });
+      });
+    });
+
+    return res.status(200).json({ success: true, data: attachments });
+  } catch (error) {
+    return next(AppError.internalServerError(error.message || "Failed to list attachments"));
   }
 }
 
@@ -156,4 +298,6 @@ module.exports = {
   getActivities,
   updateActivity,
   downloadAttachment,
+  uploadIssueAttachment,
+  listIssueAttachments,
 };
