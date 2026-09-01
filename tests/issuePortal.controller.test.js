@@ -109,7 +109,7 @@ describe("issuePortal.controller portalCreateIssue", () => {
     expect(Complaint).not.toHaveBeenCalled();
   });
 
-  it("400s for MOM without relatedMemberId or relatedMember", async () => {
+  it("400s for MOM without relatedMember or a named respondent", async () => {
     const req = makeReq({ body: { complaintType: "MOM" } });
     const res = makeRes();
     const next = jest.fn();
@@ -118,10 +118,10 @@ describe("issuePortal.controller portalCreateIssue", () => {
 
     expect(next.mock.calls[0][0].status).toBe(400);
     expect(Complaint).not.toHaveBeenCalled();
+    expect(profileServiceClient.searchProfiles).not.toHaveBeenCalled();
   });
 
-  it("resolves relatedMember (a free-text name) via profileService.searchProfiles when exactly one match", async () => {
-    profileServiceClient.searchProfiles.mockResolvedValue([{ _id: "resolved-profile-id" }]);
+  it("never auto-matches relatedMember against profile-service - memberIds stays just the submitter's own profile", async () => {
     const req = makeReq({ body: { complaintType: "MOM", relatedMember: "Kashif Khan" } });
     const res = makeRes();
     const next = jest.fn();
@@ -129,92 +129,37 @@ describe("issuePortal.controller portalCreateIssue", () => {
     await issuePortalController.portalCreateIssue(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(profileServiceClient.searchProfiles).toHaveBeenCalledWith(
-      "Kashif Khan",
-      expect.objectContaining({ tenantId: "tenant-1" }),
-    );
-    const constructedWith = Complaint.mock.calls[0][0];
-    expect(constructedWith.memberIds).toEqual(["my-profile-id", "resolved-profile-id"]);
-  });
-
-  it("400s with candidates when relatedMember matches more than one profile", async () => {
-    profileServiceClient.searchProfiles.mockResolvedValue([
-      { _id: "profile-a", personalInfo: { forename: "Kashif", surname: "Khan" }, membershipNumber: "M1" },
-      { _id: "profile-b", personalInfo: { forename: "Kashif", surname: "Khan" }, membershipNumber: "M2" },
-    ]);
-    const req = makeReq({ body: { complaintType: "MOM", relatedMember: "Kashif Khan" } });
-    const res = makeRes();
-    const next = jest.fn();
-
-    await issuePortalController.portalCreateIssue(req, res, next);
-
-    const err = next.mock.calls[0][0];
-    expect(err.status).toBe(400);
-    expect(err.candidates).toHaveLength(2);
-    expect(err.candidates[0]).toEqual(
-      expect.objectContaining({ profileId: "profile-a", name: "Kashif Khan", membershipNumber: "M1" }),
-    );
-    expect(Complaint).not.toHaveBeenCalled();
-  });
-
-  it("400s when relatedMember matches no profile", async () => {
-    profileServiceClient.searchProfiles.mockResolvedValue([]);
-    const req = makeReq({ body: { complaintType: "MOM", relatedMember: "Nobody Here" } });
-    const res = makeRes();
-    const next = jest.fn();
-
-    await issuePortalController.portalCreateIssue(req, res, next);
-
-    expect(next.mock.calls[0][0].status).toBe(400);
-    expect(Complaint).not.toHaveBeenCalled();
-  });
-
-  it("excludes the caller's own profile from relatedMember name-search results", async () => {
-    profileServiceClient.searchProfiles.mockResolvedValue([
-      { _id: "my-profile-id" }, // e.g. the member searching their own name
-      { _id: "other-profile-id" },
-    ]);
-    const req = makeReq({ body: { complaintType: "MOM", relatedMember: "common name" } });
-    const res = makeRes();
-    const next = jest.fn();
-
-    await issuePortalController.portalCreateIssue(req, res, next);
-
-    expect(next).not.toHaveBeenCalled();
-    const constructedWith = Complaint.mock.calls[0][0];
-    expect(constructedWith.memberIds).toEqual(["my-profile-id", "other-profile-id"]);
-  });
-
-  it("prefers relatedMemberId over relatedMember when both are present", async () => {
-    const req = makeReq({
-      body: { complaintType: "MOM", relatedMemberId: "explicit-id", relatedMember: "ignored name" },
-    });
-    const res = makeRes();
-    const next = jest.fn();
-
-    await issuePortalController.portalCreateIssue(req, res, next);
-
     expect(profileServiceClient.searchProfiles).not.toHaveBeenCalled();
     const constructedWith = Complaint.mock.calls[0][0];
-    expect(constructedWith.memberIds).toEqual(["my-profile-id", "explicit-id"]);
+    expect(constructedWith.memberIds).toEqual(["my-profile-id"]);
+    expect(constructedWith.respondents).toEqual([
+      { name: "Kashif Khan", email: null, phone: null, relationship: null },
+    ]);
   });
 
-  it("400s for MOM when relatedMemberId equals the caller's own profileId", async () => {
+  it("accepts an explicit respondents array in place of relatedMember", async () => {
     const req = makeReq({
-      body: { complaintType: "MOM", relatedMemberId: "my-profile-id" },
+      body: {
+        complaintType: "MOM",
+        respondents: [{ name: "Kashif Khan", relationship: "Colleague" }],
+      },
     });
     const res = makeRes();
     const next = jest.fn();
 
     await issuePortalController.portalCreateIssue(req, res, next);
 
-    expect(next.mock.calls[0][0].status).toBe(400);
-    expect(Complaint).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    const constructedWith = Complaint.mock.calls[0][0];
+    expect(constructedWith.memberIds).toEqual(["my-profile-id"]);
+    expect(constructedWith.respondents).toEqual([
+      { name: "Kashif Khan", relationship: "Colleague" },
+    ]);
   });
 
-  it("creates a COMPLAINT with both memberIds for a valid MOM submission", async () => {
+  it("creates a COMPLAINT for a valid MOM submission, unlinked pending CRM's manual match", async () => {
     const req = makeReq({
-      body: { complaintType: "MOM", relatedMemberId: "other-profile-id", description: "test" },
+      body: { complaintType: "MOM", relatedMember: "Other Member", description: "test" },
     });
     const res = makeRes();
     const next = jest.fn();
@@ -224,7 +169,7 @@ describe("issuePortal.controller portalCreateIssue", () => {
     expect(next).not.toHaveBeenCalled();
     expect(Complaint).toHaveBeenCalledTimes(1);
     const constructedWith = Complaint.mock.calls[0][0];
-    expect(constructedWith.memberIds).toEqual(["my-profile-id", "other-profile-id"]);
+    expect(constructedWith.memberIds).toEqual(["my-profile-id"]);
     expect(constructedWith.issueType).toBe("COMPLAINT");
     expect(constructedWith.createdViaPortal).toBe(true);
     expect(constructedWith.description).toBe("test");

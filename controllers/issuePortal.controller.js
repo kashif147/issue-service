@@ -55,49 +55,34 @@ async function resolveMyProfileOrThrow(req, tenantId) {
   return my;
 }
 
-function candidateSummary(profile) {
-  const forename = profile?.personalInfo?.forename || "";
-  const surname = profile?.personalInfo?.surname || "";
-  return {
-    profileId: String(profile._id),
-    name: [forename, surname].filter(Boolean).join(" ") || null,
-    membershipNumber: profile?.membershipNumber || null,
-  };
-}
-
 /**
- * A MOM complaint's related member, accepted either as an already-resolved
- * relatedMemberId (a profile-service profileId - what a search-and-select UI would send)
- * or a free-text relatedMember name/membership-number/etc. (whatever a caller types,
- * resolved server-side via profileServiceClient.searchProfiles - the same search
- * CRM's own "Find Issues"/member-link pickers use). relatedMemberId always wins if both are
- * present. Throws a 400 AppError - with a `candidates` array attached for the ambiguous
- * case, so a caller can show a disambiguation list - rather than silently guessing which
- * "Kashif Khan" was meant.
+ * A MOM complaint's related-member info, as free text only - deliberately NOT resolved or
+ * auto-matched against profile-service here. Matching a submitted name to an actual member
+ * profile is a judgment call (multiple members can share a name) that a CRM reviewer makes
+ * manually, not something the system guesses on the member's behalf - CRM links the real
+ * profile later via the existing PUT /issues/:id (memberIds isn't a protected field there),
+ * the same way any other issue edit works. Until that manual link happens, a MOM issue's
+ * memberIds holds only the submitter's own profile (length 1) - CRM can find
+ * not-yet-linked MOM complaints via `complaintType === "MOM" && memberIds.length < 2`.
+ *
+ * Accepts either an explicit `respondents` array (the existing free-text
+ * name/email/phone/relationship shape every complaint type already supports) or a plain
+ * `relatedMember` string, normalized into `respondents[0].name` if `respondents` wasn't
+ * also given. Throws a 400 if neither is present - the member must identify *someone*, even
+ * if the system won't attempt to resolve who that is.
  */
-async function resolveRelatedMemberId(body, { req, tenantId, myProfileId }) {
-  if (body.relatedMemberId) return String(body.relatedMemberId);
+function requireRelatedMemberDescription(body) {
+  const hasRespondentName = Array.isArray(body.respondents) && body.respondents.some((r) => r?.name);
+  const relatedMember = String(body.relatedMember || "").trim();
 
-  const query = String(body.relatedMember || "").trim();
-  if (!query) {
+  if (!hasRespondentName && !relatedMember) {
     throw AppError.badRequest(
-      "relatedMemberId (or relatedMember, a name/membership number to search for) is required when complaintType is MOM",
+      "relatedMember (the name of the member this complaint concerns) is required when complaintType is MOM",
     );
   }
 
-  const results = await profileServiceClient.searchProfiles(query, { req, tenantId });
-  const matches = (results || []).filter((profile) => String(profile._id) !== String(myProfileId));
-
-  if (matches.length === 0) {
-    throw AppError.badRequest(`No member found matching "${query}"`);
-  }
-  if (matches.length > 1) {
-    throw AppError.badRequest(
-      `Multiple members match "${query}" - please provide a membership number or more specific name`,
-      { candidates: matches.slice(0, 10).map(candidateSummary) },
-    );
-  }
-  return String(matches[0]._id);
+  if (hasRespondentName) return undefined;
+  return [{ name: relatedMember, email: null, phone: null, relationship: null }];
 }
 
 /** Own-issue lookup, shared by every portal read/write handler below - 404, never 403, on
@@ -128,24 +113,18 @@ async function portalCreateIssue(req, res, next) {
 
     const my = await resolveMyProfileOrThrow(req, tenantId);
 
-    const memberIds = [my.profileId];
+    // MOM's related member is captured as free text only, never auto-matched to a profile
+    // here - see requireRelatedMemberDescription's doc comment. memberIds stays just the
+    // submitter's own profile until CRM manually links the actual related member.
+    let derivedRespondents;
     if (body.complaintType === "MOM") {
-      const relatedMemberId = await resolveRelatedMemberId(body, {
-        req,
-        tenantId,
-        myProfileId: my.profileId,
-      });
-      if (relatedMemberId === String(my.profileId)) {
-        return next(
-          AppError.badRequest("You cannot file a Member on Member complaint about yourself"),
-        );
-      }
-      memberIds.push(relatedMemberId);
+      derivedRespondents = requireRelatedMemberDescription(body);
     }
 
     const issue = new Complaint({
       ...pickAllowedFields(body),
-      memberIds,
+      ...(derivedRespondents ? { respondents: derivedRespondents } : {}),
+      memberIds: [my.profileId],
       tenantId,
       createdBy: userId,
       createdOn: new Date(),
