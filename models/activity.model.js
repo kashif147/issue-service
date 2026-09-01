@@ -35,6 +35,13 @@ const ActivitySchema = new mongoose.Schema(
     sendNotification: { type: Boolean, default: true },
 
     attachments: { type: [mongoose.Schema.Types.Mixed], default: [] },
+
+    // Gates visibility on the member portal (controllers/issuePortal.controller.js's
+    // portalListMyIssueActivities filters on this) - default false so CRM's existing
+    // internal notes/calls stay hidden from the member by default. Portal-created comments
+    // (controllers/issuePortal.controller.js#portalAddIssueComment) always set this true;
+    // CRM can optionally set it true on its own createActivity calls to reply visibly.
+    visibleToMember: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

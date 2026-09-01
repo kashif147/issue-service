@@ -153,6 +153,16 @@ const IssueSchema = new mongoose.Schema(
       deleted: { type: Boolean, default: false },
       deletedAt: { type: Date, default: null },
     },
+
+    // System-set only (controllers/issuePortal.controller.js#portalCreateIssue), never
+    // client-settable - marks that this document was created by a member via the portal's
+    // POST /issues/portal, not a CRM staffer via POST /issues. Distinct from `origin`
+    // (which means "how the case reached the org" and is CRM-settable too, e.g. a staffer
+    // logging a case with origin=PORTAL-O after a phone call about a portal submission) -
+    // this field means "which code path created the record" and exists purely to drive the
+    // ownerRequiredExceptIr relaxation below, since a portal-submitted issue has no owner
+    // assigned yet by design (CRM assigns one on review).
+    createdViaPortal: { type: Boolean, default: false },
   },
   {
     timestamps: true,
@@ -173,13 +183,15 @@ IssueSchema.pre("validate", function issueStatusOtherRequired(next) {
   next();
 });
 
-// Owner (User Id) required for every issue type except IR: IR auto-resolves owner.userId
-// to the primary member's IRO (services/issue.service.js#autoRouteOwner, run before
-// issue.save() in prepareNewIssue) and, per the plan, deliberately leaves it null rather
-// than failing the create if that lookup has no match - a plain `required: true` on the
-// field itself would break that documented fallback.
-IssueSchema.pre("validate", function ownerRequiredExceptIr(next) {
-  if (this.issueType !== "IR" && !this.owner?.userId) {
+// Owner (User Id) required for every issue type except IR and portal-submitted issues: IR
+// auto-resolves owner.userId to the primary member's IRO (services/issue.service.js#autoRouteOwner,
+// run before issue.save() in prepareNewIssue) and, per the plan, deliberately leaves it null
+// rather than failing the create if that lookup has no match - a plain `required: true` on
+// the field itself would break that documented fallback. A portal-submitted issue
+// (createdViaPortal) also has no owner yet by design - the member has no one to assign, CRM
+// picks an owner on review - see controllers/issuePortal.controller.js#portalCreateIssue.
+IssueSchema.pre("validate", function ownerRequiredUnlessIrOrPortal(next) {
+  if (this.issueType !== "IR" && !this.createdViaPortal && !this.owner?.userId) {
     return next(new Error("owner.userId is required"));
   }
   next();

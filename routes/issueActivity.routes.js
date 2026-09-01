@@ -23,5 +23,10 @@ router.put(
   defaultPolicyMiddleware.requirePermission("issues", "write"),
   issueActivityController.updateActivity,
 );
+router.get(
+  "/activities/:activityId/attachments/:index/download",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueActivityController.downloadAttachment,
+);
 
 module.exports = router;

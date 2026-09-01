@@ -221,54 +221,7 @@ async function createIssue(req, res, next) {
 
     await issue.save();
 
-    // Fired concurrently, not sequentially: each publish() call independently waits up to
-    // ~10s for a RabbitMQ connection before giving up (rabbitmq-middleware's own connection
-    // -wait-then-retry behavior) - awaiting these one after another would compound into a
-    // multi-x-10s response delay if RabbitMQ is ever down. Promise.all bounds the worst case
-    // to the slowest single call instead.
-    const publishTasks = [
-      publishSafely(() => issueEvents.publishIssueCreated(issue), "issues.issue.created.v1"),
-      publishSafely(
-        () =>
-          issueEvents.publishIssueAudit({
-            action: "create",
-            tenantId,
-            resourceId: String(issue._id),
-            actorId: userId,
-            actorEmail: req.user?.email || req.headers["x-user-email"] || null,
-            after: issue.toObject(),
-          }),
-        "issues.issue.audit.v1 (create)",
-      ),
-      publishSafely(
-        () => issueEvents.publishIssueReportingSnapshot(issue),
-        "issues.issue.reporting.snapshot.v1 (create)",
-      ),
-    ];
-
-    // High-priority issue created for owner (plan §1.4) - the reused generic in-app
-    // notification event, fired directly (not via a dedicated issues.* routing key).
-    if (issue.priority === "HIGH" && issue.owner?.userId) {
-      publishTasks.push(
-        publishSafely(
-          () =>
-            issueEvents.publishMemberNotificationRequested({
-              tenantId,
-              userId: issue.owner.userId,
-              title: "Urgent: new high-priority issue assigned to you",
-              body: `A new high-priority issue (${issue.internalReferenceNumber || issue.caseFileNumber}) has been assigned to you.`,
-              metadata: {
-                type: "ISSUE_HIGH_PRIORITY_CREATED",
-                issueId: String(issue._id),
-                deepLink: `/CasesDetails?issueId=${issue._id}`,
-              },
-            }),
-          "members.member.notification.requested.v1 (high-priority-created)",
-        ),
-      );
-    }
-
-    await Promise.all(publishTasks);
+    await issueService.publishIssueCreatedEvents(issue, { tenantId, userId, req });
 
     return res.status(201).json({ success: true, data: issue });
   } catch (error) {

@@ -59,6 +59,32 @@ async function searchProfiles(query, { req, tenantId } = {}) {
   }
 }
 
+/**
+ * The calling member's own profile, for the portal issue-creation/my-issues endpoints
+ * (controllers/issuePortal.controller.js) - backed by profile-service's
+ * `GET /api/profile/my-profile` (controllers/profile.controller.js#getMyProfile), which
+ * resolves purely from the caller's own gateway-verified identity (no id in the request).
+ * That endpoint 403s for a non-PORTAL caller and returns `{data: null}` (200, not 404) when
+ * a PORTAL user has no linked profile yet - both cases return null here; `response.data.data`
+ * covers both the success envelope (`{status:"success", data:{...}}`) and the not-found one
+ * (`{data: null, message:...}`), same key either way.
+ */
+async function getMyProfile({ req, tenantId } = {}) {
+  const base = PROFILE_SERVICE_URL.replace(/\/$/, "");
+  try {
+    const response = await axios.get(`${base}/api/profile/my-profile`, {
+      headers: buildHeaders(req, tenantId),
+      timeout: 15000,
+      validateStatus: (status) => status < 500,
+    });
+    if (response.status >= 400) return null;
+    return response.data?.data || null;
+  } catch (error) {
+    console.error("[profileService.client] getMyProfile failed:", error.message);
+    return null;
+  }
+}
+
 /** Single profile by id, including professionalDetails (workLocation/branch/region/grade). */
 async function getProfileById(profileId, { req, tenantId } = {}) {
   if (!profileId) return null;
@@ -109,6 +135,7 @@ async function getProfessionalDetails(profileId, { req, tenantId } = {}) {
 module.exports = {
   buildHeaders,
   searchProfiles,
+  getMyProfile,
   getProfileById,
   getProfilesBatch,
   getProfessionalDetails,

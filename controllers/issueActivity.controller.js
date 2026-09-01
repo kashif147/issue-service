@@ -2,6 +2,7 @@ const Issue = require("../models/issue.model");
 const Activity = require("../models/activity.model");
 const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
+const { getDownloadSasUrl } = require("../services/azure.blob.service");
 
 /** The parent Issue, subject to the same team-visibility + complaint-hide filters as issue.controller.js. */
 async function loadParentIssue(req, issueId) {
@@ -49,6 +50,10 @@ async function createActivity(req, res, next) {
       // only an explicit false opts out.
       sendNotification: body.sendNotification !== false,
       attachments: Array.isArray(body.attachments) ? body.attachments : [],
+      // Defaults to false - only an explicit true surfaces this internal-note-by-default
+      // activity to the member on the portal (controllers/issuePortal.controller.js's
+      // portalListMyIssueActivities), e.g. when CRM is replying to a member's comment.
+      visibleToMember: !!body.visibleToMember,
     });
 
     return res.status(201).json({ success: true, data: activity });
@@ -116,8 +121,39 @@ async function updateActivity(req, res, next) {
   }
 }
 
+/** CRM-side counterpart to controllers/issuePortal.controller.js#portalDownloadAttachment -
+ * lets a team member with read access to the parent issue download a file a member
+ * uploaded via the portal (or that CRM itself attached to an activity). */
+async function downloadAttachment(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const activity = await Activity.findOne({ _id: req.params.activityId, tenantId });
+    if (!activity) return next(AppError.notFound("Attachment not found"));
+
+    const issue = await loadParentIssue(req, activity.issueId);
+    if (!issue) return next(AppError.notFound("Attachment not found"));
+
+    if (!hasTeamReadPermission(req, issue.issueType)) {
+      return next(AppError.forbidden("Not permitted to view activities for issues of this type"));
+    }
+
+    const index = Number(req.params.index);
+    const attachment = Array.isArray(activity.attachments) ? activity.attachments[index] : null;
+    if (!attachment?.blobPath) return next(AppError.notFound("Attachment not found"));
+
+    const url = getDownloadSasUrl(attachment.blobPath, 15);
+    if (!url) return next(AppError.serviceUnavailable("Attachment storage is not configured"));
+
+    return res.redirect(url);
+  } catch (error) {
+    if (error.name === "CastError") return next(AppError.notFound("Attachment not found"));
+    return next(AppError.internalServerError(error.message || "Failed to download attachment"));
+  }
+}
+
 module.exports = {
   createActivity,
   getActivities,
   updateActivity,
+  downloadAttachment,
 };

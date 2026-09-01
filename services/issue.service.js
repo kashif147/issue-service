@@ -1,5 +1,7 @@
 const referenceNumberGenerator = require("./referenceNumberGenerator");
 const profileServiceClient = require("./profileService.client");
+const issueEvents = require("../rabbitMQ/publishers/issue.events.publisher.js");
+const { publishSafely } = require("../utils/publishSafely");
 
 // issueType -> owner.team, per the plan's auto-routing-on-save pseudocode (§1.2).
 const OWNER_TEAM_BY_ISSUE_TYPE = {
@@ -191,6 +193,63 @@ async function prepareNewIssue(issue, { req, tenantId, userInitials } = {}) {
   return issue;
 }
 
+/**
+ * Post-save event publishing shared by controllers/issue.controller.js#createIssue and
+ * controllers/issuePortal.controller.js#portalCreateIssue - identical in both places, so
+ * factored out rather than duplicated. Fired concurrently, not sequentially: each
+ * publishSafely() call independently waits up to ~10s for a RabbitMQ connection before
+ * giving up (rabbitmq-middleware's own connection-wait-then-retry behavior) - awaiting
+ * these one after another would compound into a multi-x-10s response delay if RabbitMQ is
+ * ever down. The HIGH-priority owner-notification branch naturally never fires for a
+ * portal-submitted issue (owner.userId is always null there), so no separate flag is needed
+ * to skip it for that caller.
+ */
+async function publishIssueCreatedEvents(issue, { tenantId, userId, req } = {}) {
+  const publishTasks = [
+    publishSafely(() => issueEvents.publishIssueCreated(issue), "issues.issue.created.v1"),
+    publishSafely(
+      () =>
+        issueEvents.publishIssueAudit({
+          action: "create",
+          tenantId,
+          resourceId: String(issue._id),
+          actorId: userId,
+          actorEmail: req?.user?.email || req?.headers?.["x-user-email"] || null,
+          after: issue.toObject(),
+        }),
+      "issues.issue.audit.v1 (create)",
+    ),
+    publishSafely(
+      () => issueEvents.publishIssueReportingSnapshot(issue),
+      "issues.issue.reporting.snapshot.v1 (create)",
+    ),
+  ];
+
+  // High-priority issue created for owner (plan §1.4) - the reused generic in-app
+  // notification event, fired directly (not via a dedicated issues.* routing key).
+  if (issue.priority === "HIGH" && issue.owner?.userId) {
+    publishTasks.push(
+      publishSafely(
+        () =>
+          issueEvents.publishMemberNotificationRequested({
+            tenantId,
+            userId: issue.owner.userId,
+            title: "Urgent: new high-priority issue assigned to you",
+            body: `A new high-priority issue (${issue.internalReferenceNumber || issue.caseFileNumber}) has been assigned to you.`,
+            metadata: {
+              type: "ISSUE_HIGH_PRIORITY_CREATED",
+              issueId: String(issue._id),
+              deepLink: `/CasesDetails?issueId=${issue._id}`,
+            },
+          }),
+        "members.member.notification.requested.v1 (high-priority-created)",
+      ),
+    );
+  }
+
+  await Promise.all(publishTasks);
+}
+
 module.exports = {
   OWNER_TEAM_BY_ISSUE_TYPE,
   TEAM_RESOURCE_BY_ISSUE_TYPE,
@@ -206,4 +265,5 @@ module.exports = {
   assignReferenceNumbers,
   assignAutoTitles,
   prepareNewIssue,
+  publishIssueCreatedEvents,
 };
