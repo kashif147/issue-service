@@ -243,6 +243,75 @@ describe("issuePortal.controller portalListMyIssues", () => {
   });
 });
 
+describe("issuePortal.controller portalGetMyIssueById", () => {
+  beforeEach(() => {
+    profileServiceClient.getMyProfile.mockResolvedValue({ profileId: "my-profile-id" });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("404s when the issue isn't the caller's", async () => {
+    jest.spyOn(Issue, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "not-mine" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueById(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("embeds a flattened attachments list from the issue's member-visible activities", async () => {
+    jest.spyOn(Issue, "findOne").mockResolvedValue({
+      _id: "issue-1",
+      issueType: "COMPLAINT",
+      toObject: () => ({ _id: "issue-1", issueType: "COMPLAINT" }),
+    });
+    jest.spyOn(Activity, "find").mockReturnValue({
+      sort: jest.fn().mockResolvedValue([
+        {
+          _id: "activity-1",
+          createdAt: new Date("2026-09-02T16:29:16.975Z"),
+          attachments: [{ filename: "doc.pdf", contentType: "application/pdf", size: 100 }],
+        },
+      ]),
+    });
+    const req = makeReq({ params: { id: "issue-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueById(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(Activity.find).toHaveBeenCalledWith(
+      expect.objectContaining({ issueId: "issue-1", visibleToMember: true }),
+    );
+    const data = res.json.mock.calls[0][0].data;
+    expect(data.attachments).toEqual([
+      expect.objectContaining({ activityId: "activity-1", index: 0, filename: "doc.pdf" }),
+    ]);
+  });
+
+  it("returns an empty attachments array when there are none", async () => {
+    jest.spyOn(Issue, "findOne").mockResolvedValue({
+      _id: "issue-1",
+      issueType: "COMPLAINT",
+      toObject: () => ({ _id: "issue-1", issueType: "COMPLAINT" }),
+    });
+    jest.spyOn(Activity, "find").mockReturnValue({ sort: jest.fn().mockResolvedValue([]) });
+    const req = makeReq({ params: { id: "issue-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueById(req, res, next);
+
+    const data = res.json.mock.calls[0][0].data;
+    expect(data.attachments).toEqual([]);
+  });
+});
+
 describe("issuePortal.controller portalAddIssueComment", () => {
   let findOneSpy;
 

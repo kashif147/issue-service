@@ -1,0 +1,544 @@
+{
+  "info": {
+    "_postman_id": "b6a2a9b0-3f0e-4c6a-9a1a-issue-service-collection",
+    "name": "issue-service",
+    "description": "All backend/issue-service endpoints (Complaints, Fitness to Practice, Industrial Relations, Data Protection issue management) - CRM routes, member-portal routes, activities/attachments, IRO/PA assignments, issue designations, dropdown lookups, and grid Save-View templates.\n\nAuth: every route under {{serviceRoot}}/api is gated by gateway-verified headers or a legacy `Authorization: Bearer <jwt>` fallback (see middlewares/auth.js), plus a separate RBAC permission check per route via user-service's Policy Decision Point. Set the `token` collection variable to a valid JWT (or, for local dev with AUTH_BYPASS_ENABLED=true, still a well-formed JWT - bypass only skips the permission check, not JWT parsing).\n\n`GET /health` and `GET /api` are the only two unauthenticated routes and sit OUTSIDE the `/api` router (not `/api/health`).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "serviceRoot", "value": "https://projectshell-vm.northeurope.cloudapp.azure.com/issue-service", "type": "string" },
+    { "key": "baseUrl", "value": "{{serviceRoot}}/api", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "issueId", "value": "", "type": "string" },
+    { "key": "activityId", "value": "", "type": "string" },
+    { "key": "attachmentIndex", "value": "0", "type": "string" },
+    { "key": "templateId", "value": "", "type": "string" },
+    { "key": "assignmentId", "value": "", "type": "string" },
+    { "key": "relatedMemberId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health / Info",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{serviceRoot}}/health", "host": ["{{serviceRoot}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "API info (unauthenticated)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{serviceRoot}}/api", "host": ["{{serviceRoot}}"], "path": ["api"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Issues (CRM)",
+      "description": "Gated by requirePermission(\"issues\", \"read\"/\"write\") at the route level, plus a document-specific requirePermission(\"issues-<team>\", \"read\"/\"write\") check inside the controller for update/status/delete (team resource depends on the loaded issue's issueType).",
+      "item": [
+        {
+          "name": "List issues",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issues?issueType=COMPLAINT&priority=HIGH&issueStatus=ACTIVE&q=",
+              "host": ["{{baseUrl}}"],
+              "path": ["issues"],
+              "query": [
+                { "key": "issueType", "value": "COMPLAINT", "description": "COMPLAINT | FTP | IR | DP", "disabled": true },
+                { "key": "priority", "value": "HIGH", "description": "LOW | MEDIUM | HIGH", "disabled": true },
+                { "key": "issueStatus", "value": "ACTIVE", "disabled": true },
+                { "key": "q", "value": "", "description": "matches caseTitle/internalReferenceNumber", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Find Issues (search)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issues/search?q=01-26",
+              "host": ["{{baseUrl}}"],
+              "path": ["issues", "search"],
+              "query": [
+                { "key": "q", "value": "01-26", "description": "matches internalReferenceNumber/caseFileNumber/wrcCaseNumber/issueType, or delegates to profile-service member search (membership no/surname/mobile/email)" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get issue by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}"] }
+          }
+        },
+        {
+          "name": "Create issue - COMPLAINT",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issueType\": \"COMPLAINT\",\n  \"description\": \"Member reported an incident\",\n  \"availability\": \"Weekday mornings\",\n  \"issueSource\": \"MEMBER-IS\",\n  \"origin\": \"PHONE-O\",\n  \"dateReceived\": \"2026-09-01T09:00:00.000Z\",\n  \"memberIds\": [],\n  \"groupId\": null,\n  \"priority\": \"MEDIUM\",\n  \"owner\": { \"userId\": \"<crm-user-id>\" },\n  \"complaintType\": \"MOO\",\n  \"externalSolicitorInvolved\": false,\n  \"respondents\": [],\n  \"externalAgency\": null,\n  \"externalCaseRef\": null\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues", "host": ["{{baseUrl}}"], "path": ["issues"] }
+          }
+        },
+        {
+          "name": "Create issue - FTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issueType\": \"FTP\",\n  \"description\": \"Fitness to practice concern raised\",\n  \"issueSource\": \"MEMBER-IS\",\n  \"origin\": \"EMAIL-O\",\n  \"dateReceived\": \"2026-09-01T09:00:00.000Z\",\n  \"memberIds\": [],\n  \"priority\": \"HIGH\",\n  \"owner\": { \"userId\": \"<crm-user-id>\" },\n  \"aragReferenceNo\": null,\n  \"criteriaLetterStatus\": \"PENDING\",\n  \"externalSolicitorInvolved\": false,\n  \"membershipVerified\": false,\n  \"legislation\": \"SEC55I\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues", "host": ["{{baseUrl}}"], "path": ["issues"] }
+          }
+        },
+        {
+          "name": "Create issue - IR",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issueType\": \"IR\",\n  \"description\": \"Industrial relations case\",\n  \"issueSource\": \"MEMBER-IS\",\n  \"origin\": \"PHONE-O\",\n  \"dateReceived\": \"2026-09-01T09:00:00.000Z\",\n  \"memberIds\": [],\n  \"priority\": \"MEDIUM\",\n  \"caseType\": \"INDV\",\n  \"issueDesignation\": \"<user-service-lookup-id-from-GET-issue-designations>\",\n  \"correspondenceWithExternalParty\": false\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues", "host": ["{{baseUrl}}"], "path": ["issues"] }
+          }
+        },
+        {
+          "name": "Create issue - DP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issueType\": \"DP\",\n  \"description\": \"Data protection subject access request\",\n  \"issueSource\": \"MEMBER-IS\",\n  \"origin\": \"EMAIL-O\",\n  \"dateReceived\": \"2026-09-01T09:00:00.000Z\",\n  \"memberIds\": [],\n  \"priority\": \"MEDIUM\",\n  \"owner\": { \"userId\": \"<crm-user-id>\" },\n  \"severity\": \"LOW\",\n  \"dpStatus\": \"OPEN\",\n  \"dpIssueType\": \"DSAR\",\n  \"dpcInformed\": false\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues", "host": ["{{baseUrl}}"], "path": ["issues"] }
+          }
+        },
+        {
+          "name": "Update issue (general fields + member/group linking)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated description\",\n  \"priority\": \"HIGH\",\n  \"owner\": { \"userId\": \"<crm-user-id>\" },\n  \"memberIds\": [\"<profile-id-1>\", \"<profile-id-2>\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}"] }
+          }
+        },
+        {
+          "name": "Update issue status",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issueStatus\": \"CLOSED\",\n  \"resolution\": \"CLSD\",\n  \"dateResolved\": \"2026-09-01T12:00:00.000Z\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}/status", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}", "status"] }
+          }
+        },
+        {
+          "name": "Soft-delete issue",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Issues - Member Portal",
+      "description": "Gated by the platform's generic requirePermission(\"portal\", \"read\"/\"write\") - the MEMBER role, not the CRM \"issues\"/\"issues-<team>\" resources. Always creates issueType=COMPLAINT server-side regardless of body content; owner/priority/issueStatus can't be set from these routes.",
+      "item": [
+        {
+          "name": "Create Complaint (portal) - MOO/TPC",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"complaintType\": \"MOO\",\n  \"description\": \"Complaint about my employer\",\n  \"availability\": \"Evenings\",\n  \"externalAgency\": null,\n  \"externalCaseRef\": null\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/portal", "host": ["{{baseUrl}}"], "path": ["issues", "portal"] }
+          }
+        },
+        {
+          "name": "Create Complaint (portal) - MOM (related member as free text)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"complaintType\": \"MOM\",\n  \"description\": \"Complaint about another member\",\n  \"relatedMember\": \"Kashif Khan\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/portal", "host": ["{{baseUrl}}"], "path": ["issues", "portal"] }
+          }
+        },
+        {
+          "name": "List my issues",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/portal/mine", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "mine"] }
+          }
+        },
+        {
+          "name": "Get my issue by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}"] }
+          }
+        },
+        {
+          "name": "List my issue's activities (member-visible only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "activities"] }
+          }
+        },
+        {
+          "name": "Add comment (text only)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Just checking in on the status of my case.\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "activities"] }
+          }
+        },
+        {
+          "name": "Add comment with attachment (multipart)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "body", "value": "Attaching a supporting document", "type": "text" },
+                { "key": "file", "type": "file", "src": [] }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "activities"] }
+          }
+        },
+        {
+          "name": "Download my attachment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities/{{activityId}}/attachments/{{attachmentIndex}}/download",
+              "host": ["{{baseUrl}}"],
+              "path": ["issues", "portal", "{{issueId}}", "activities", "{{activityId}}", "attachments", "{{attachmentIndex}}", "download"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Activities & Attachments (CRM)",
+      "description": "Gated by requirePermission(\"issues\",\"read\"/\"write\") at the route level, plus a per-issueType issues-<team> read/write check inside the controller. Blocked entirely once the parent issue's issueStatus is CLOSED.",
+      "item": [
+        {
+          "name": "List activities on an issue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issues/{{issueId}}/activities?pertinentToFileReview=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["issues", "{{issueId}}", "activities"],
+              "query": [{ "key": "pertinentToFileReview", "value": "true", "disabled": true }]
+            }
+          }
+        },
+        {
+          "name": "Log activity",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activityType\": \"CALL\",\n  \"subject\": \"Called member\",\n  \"body\": \"<p>Discussed next steps with the member.</p>\",\n  \"interactionDate\": \"2026-09-01T10:00:00.000Z\",\n  \"pertinentToFileReview\": false,\n  \"sendNotification\": true,\n  \"visibleToMember\": false\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}/activities", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}", "activities"] }
+          }
+        },
+        {
+          "name": "Update activity",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"<p>Updated note text.</p>\",\n  \"visibleToMember\": true\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/activities/{{activityId}}", "host": ["{{baseUrl}}"], "path": ["activities", "{{activityId}}"] }
+          }
+        },
+        {
+          "name": "List issue attachments (flattened)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}/attachments", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}", "attachments"] }
+          }
+        },
+        {
+          "name": "Upload attachment to issue (multipart)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "file", "type": "file", "src": [] }]
+            },
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}/attachments", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}", "attachments"] }
+          }
+        },
+        {
+          "name": "Download attachment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/activities/{{activityId}}/attachments/{{attachmentIndex}}/download",
+              "host": ["{{baseUrl}}"],
+              "path": ["activities", "{{activityId}}", "attachments", "{{attachmentIndex}}", "download"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "IRO/PA Assignments",
+      "description": "One row per IRO who has a PA on file - iroUserId/paUserId are user-service User ids. Gated on the base \"issues\" resource.",
+      "item": [
+        {
+          "name": "List assignments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/iro-pa-assignments", "host": ["{{baseUrl}}"], "path": ["iro-pa-assignments"] }
+          }
+        },
+        {
+          "name": "Create assignment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"iroUserId\": \"<iro-user-id>\",\n  \"paUserId\": \"<pa-user-id>\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/iro-pa-assignments", "host": ["{{baseUrl}}"], "path": ["iro-pa-assignments"] }
+          }
+        },
+        {
+          "name": "Update assignment",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paUserId\": \"<new-pa-user-id>\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/iro-pa-assignments/{{assignmentId}}", "host": ["{{baseUrl}}"], "path": ["iro-pa-assignments", "{{assignmentId}}"] }
+          }
+        },
+        {
+          "name": "Delete assignment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/iro-pa-assignments/{{assignmentId}}", "host": ["{{baseUrl}}"], "path": ["iro-pa-assignments", "{{assignmentId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Issue Designations",
+      "description": "IR-only, gated on issues-ir:read. Thin read-through proxy over user-service's Lookup system (LookupType ISSUEDESG) - no local storage.",
+      "item": [
+        {
+          "name": "Search issue designations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issue-designations?search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["issue-designations"],
+              "query": [{ "key": "search", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Issue Dropdown Lookups",
+      "description": "All gated on the base \"issues\" resource, read-through proxies over user-service's Lookup/LookupType system. Prefer the combined issue-dropdown-lookups endpoint over the individual ones when populating a Create/Edit Cases form.",
+      "item": [
+        {
+          "name": "Combined dropdown lookups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issue-dropdown-lookups", "host": ["{{baseUrl}}"], "path": ["issue-dropdown-lookups"] }
+          }
+        },
+        {
+          "name": "Issue types",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issue-types", "host": ["{{baseUrl}}"], "path": ["issue-types"] }
+          }
+        },
+        {
+          "name": "Issue statuses (scoped to an issue type)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issue-statuses?issueType=COMPLAINT",
+              "host": ["{{baseUrl}}"],
+              "path": ["issue-statuses"],
+              "query": [{ "key": "issueType", "value": "COMPLAINT", "description": "COMPLAINT | FTP | IR | DP" }]
+            }
+          }
+        },
+        {
+          "name": "Origins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/origins", "host": ["{{baseUrl}}"], "path": ["origins"] }
+          }
+        },
+        {
+          "name": "Issue sources",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issue-sources", "host": ["{{baseUrl}}"], "path": ["issue-sources"] }
+          }
+        },
+        {
+          "name": "Resolutions (scoped to an issue type)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/resolutions?issueType=FTP",
+              "host": ["{{baseUrl}}"],
+              "path": ["resolutions"],
+              "query": [{ "key": "issueType", "value": "FTP", "description": "currently only seeded under FTP/IR" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Grid Templates (Save View)",
+      "description": "Gated on the dedicated \"issues-templates\" resource. templateType is one of: issuessummary, issuesclosed, issuescomplaints, issuesftp, issuesir, issuesdataprotection.",
+      "item": [
+        {
+          "name": "Create template",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateName\": \"My FTP view\",\n  \"templateType\": \"issuesftp\",\n  \"filters\": {\n    \"priority\": { \"operator\": \"equal_to\", \"values\": [\"HIGH\"] }\n  },\n  \"columns\": [\"internalReferenceNumber\", \"caseTitle\", \"issueStatus\", \"priority\"],\n  \"columnLabels\": { \"internalReferenceNumber\": \"Ref #\" },\n  \"isDefault\": false,\n  \"pinned\": false\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/templates", "host": ["{{baseUrl}}"], "path": ["templates"] }
+          }
+        },
+        {
+          "name": "List my templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/templates?templateType=issuesftp",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates"],
+              "query": [{ "key": "templateType", "value": "issuesftp" }]
+            }
+          }
+        },
+        {
+          "name": "Get default template",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/templates/default?templateType=issuesftp",
+              "host": ["{{baseUrl}}"],
+              "path": ["templates", "default"],
+              "query": [{ "key": "templateType", "value": "issuesftp" }]
+            }
+          }
+        },
+        {
+          "name": "Get template by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/templates/{{templateId}}", "host": ["{{baseUrl}}"], "path": ["templates", "{{templateId}}"] }
+          }
+        },
+        {
+          "name": "Update template",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateName\": \"My FTP view (updated)\",\n  \"isDefault\": true\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/templates/{{templateId}}", "host": ["{{baseUrl}}"], "path": ["templates", "{{templateId}}"] }
+          }
+        },
+        {
+          "name": "Delete template",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/templates/{{templateId}}", "host": ["{{baseUrl}}"], "path": ["templates", "{{templateId}}"] }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -98,6 +98,38 @@ async function loadMyIssue(tenantId, myProfileId, issueId) {
   });
 }
 
+/**
+ * Flattens every member-visible activity's attachments on this issue into one list - GET
+ * /issues/portal/:id embeds this directly (rather than making the caller separately fetch
+ * /activities and cross-reference) since attachments live on Activity documents, not the
+ * Issue itself, and that split isn't obvious/convenient from a portal client. Same shape
+ * CRM's listIssueAttachments (issueActivity.controller.js) returns, minus internal-only
+ * activities (visibleToMember: false is excluded, matching portalListMyIssueActivities).
+ */
+async function fetchMyIssueAttachments(tenantId, issueId) {
+  const activities = await Activity.find({
+    tenantId,
+    issueId,
+    visibleToMember: true,
+    "attachments.0": { $exists: true },
+  }).sort({ createdAt: -1 });
+
+  const attachments = [];
+  activities.forEach((activity) => {
+    (activity.attachments || []).forEach((attachment, index) => {
+      attachments.push({
+        activityId: activity._id,
+        index,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        uploadedAt: activity.createdAt,
+      });
+    });
+  });
+  return attachments;
+}
+
 async function portalCreateIssue(req, res, next) {
   try {
     const { tenantId, userId } = req.ctx;
@@ -180,7 +212,12 @@ async function portalGetMyIssueById(req, res, next) {
     const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
     if (!issue) return next(AppError.notFound("Issue not found"));
 
-    return res.status(200).json({ success: true, data: issue });
+    const attachments = await fetchMyIssueAttachments(tenantId, issue._id);
+
+    return res.status(200).json({
+      success: true,
+      data: { ...issue.toObject(), attachments },
+    });
   } catch (error) {
     if (error instanceof AppError) return next(error);
     if (error.name === "CastError") return next(AppError.notFound("Issue not found"));
