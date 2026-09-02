@@ -10,6 +10,7 @@ const issueService = require("../services/issue.service");
 const issueEvents = require("../rabbitMQ/publishers/issue.events.publisher.js");
 const { publishSafely } = require("../utils/publishSafely");
 const profileServiceClient = require("../services/profileService.client");
+const { recordHistory, summarizeObjectDiff } = require("../services/history.service");
 
 // Every publish below is best-effort: a RabbitMQ hiccup must never fail the HTTP response
 // that already succeeded against Mongo (same principle as issue.service.js's
@@ -223,6 +224,17 @@ async function createIssue(req, res, next) {
 
     await issueService.publishIssueCreatedEvents(issue, { tenantId, userId, req });
 
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ISSUE",
+      entityId: issue._id,
+      action: "CREATED",
+      summary: "Issue created",
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+    });
+
     return res.status(201).json({ success: true, data: issue });
   } catch (error) {
     if (error.name === "ValidationError") {
@@ -292,6 +304,21 @@ async function updateIssue(req, res, next) {
 
     await Promise.all(publishTasks);
 
+    const diff = summarizeObjectDiff(before, after);
+    if (diff) {
+      recordHistory({
+        tenantId,
+        issueId: issue._id,
+        entityType: "ISSUE",
+        entityId: issue._id,
+        action: "UPDATED",
+        summary: diff.summary,
+        changedFields: diff.changedFields,
+        actorId: userId,
+        actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+      });
+    }
+
     return res.status(200).json({ success: true, data: issue });
   } catch (error) {
     if (error.name === "ValidationError") {
@@ -314,6 +341,13 @@ async function updateIssueStatus(req, res, next) {
     }
 
     const fromStatus = issue.issueStatus;
+    const before = {
+      issueStatus: issue.issueStatus,
+      issueStatusOther: issue.issueStatusOther,
+      resolution: issue.resolution,
+      resolutionOther: issue.resolutionOther,
+      dateResolved: issue.dateResolved,
+    };
 
     const { issueStatus, issueStatusOther, resolution, resolutionOther, dateResolved } =
       req.body || {};
@@ -356,6 +390,27 @@ async function updateIssueStatus(req, res, next) {
       );
     }
     await Promise.all(publishTasks);
+
+    const diff = summarizeObjectDiff(before, {
+      issueStatus: issue.issueStatus,
+      issueStatusOther: issue.issueStatusOther,
+      resolution: issue.resolution,
+      resolutionOther: issue.resolutionOther,
+      dateResolved: issue.dateResolved,
+    });
+    if (diff) {
+      recordHistory({
+        tenantId,
+        issueId: issue._id,
+        entityType: "ISSUE",
+        entityId: issue._id,
+        action: "UPDATED",
+        summary: diff.summary,
+        changedFields: diff.changedFields,
+        actorId: userId,
+        actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+      });
+    }
 
     return res.status(200).json({ success: true, data: issue });
   } catch (error) {
@@ -401,6 +456,17 @@ async function softDeleteIssue(req, res, next) {
         "issues.issue.reporting.snapshot.v1 (delete)",
       ),
     ]);
+
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ISSUE",
+      entityId: issue._id,
+      action: "DELETED",
+      summary: "Issue deleted",
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+    });
 
     return res.status(200).json({ success: true, data: issue });
   } catch (error) {

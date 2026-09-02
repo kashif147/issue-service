@@ -1,12 +1,22 @@
 const Issue = require("../models/issue.model");
 const Activity = require("../models/activity.model");
+const HistoryEntry = require("../models/historyEntry.model");
 const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
+const { recordHistory, summarizeObjectDiff } = require("../services/history.service");
 const {
   uploadToBlob,
   getDownloadSasUrl,
   buildIssueAttachmentBlobPath,
 } = require("../services/azure.blob.service");
+
+/** Short, human-readable label for an Activity in a history summary - "a NOTE" / "a NOTE
+ * (Called the member)" when it has a subject, never the full rich-text body. */
+function activityLabel(activity) {
+  return activity.subject
+    ? `a ${activity.activityType} activity ("${activity.subject}")`
+    : `a ${activity.activityType} activity`;
+}
 
 /** The parent Issue, subject to the same team-visibility + complaint-hide filters as issue.controller.js. */
 async function loadParentIssue(req, issueId) {
@@ -84,6 +94,17 @@ async function createActivity(req, res, next) {
       visibleToMember: !!body.visibleToMember,
     });
 
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "CREATED",
+      summary: `Logged ${activityLabel(activity)}`,
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+    });
+
     return res.status(201).json({ success: true, data: activity });
   } catch (error) {
     if (error instanceof AppError) return next(error);
@@ -103,7 +124,7 @@ async function getActivities(req, res, next) {
       return next(AppError.forbidden("Not permitted to view activities for issues of this type"));
     }
 
-    const filter = { tenantId: req.ctx.tenantId, issueId: issue._id };
+    const filter = { tenantId: req.ctx.tenantId, issueId: issue._id, "meta.deleted": { $ne: true } };
     if (req.query.pertinentToFileReview !== undefined) {
       filter.pertinentToFileReview = req.query.pertinentToFileReview === "true";
     }
@@ -137,16 +158,86 @@ async function updateActivity(req, res, next) {
     for (const protectedField of ["_id", "tenantId", "issueId", "createdBy"]) {
       delete body[protectedField];
     }
+    // Only enforced when the caller is actually touching body - an edit that only flips
+    // e.g. visibleToMember shouldn't be blocked by this.
+    if (Object.prototype.hasOwnProperty.call(body, "body") && !hasMeaningfulText(body.body)) {
+      return next(AppError.badRequest("Activity text is required"));
+    }
+
+    const before = activity.toObject();
     Object.assign(activity, body);
     await activity.save();
+    const after = activity.toObject();
+
+    const diff = summarizeObjectDiff(before, after);
+    if (diff) {
+      recordHistory({
+        tenantId,
+        issueId: issue._id,
+        entityType: "ACTIVITY",
+        entityId: activity._id,
+        action: "UPDATED",
+        summary: `Edited ${activityLabel(activity)}: ${diff.summary}`,
+        changedFields: diff.changedFields,
+        actorId: req.ctx.userId,
+        actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+      });
+    }
 
     return res.status(200).json({ success: true, data: activity });
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     if (error.name === "ValidationError") {
       return next(AppError.badRequest(error.message));
     }
     if (error.name === "CastError") return next(AppError.notFound("Activity not found"));
     return next(AppError.internalServerError(error.message || "Failed to update activity"));
+  }
+}
+
+/** Soft-delete (see models/activity.model.js's meta field doc comment) - content is
+ * preserved, not wiped, so the DELETED history entry can show what was actually removed.
+ * Same team-write-permission floor as updateActivity; deleting on a closed issue is still
+ * allowed (matches updateActivity's existing "editing an old note is fine" stance - only
+ * *new* activities/attachments are blocked on a closed issue, see assertIssueNotClosed's
+ * callers). */
+async function deleteActivity(req, res, next) {
+  try {
+    const { tenantId, userId } = req.ctx;
+    const activity = await Activity.findOne({
+      _id: req.params.activityId,
+      tenantId,
+      "meta.deleted": { $ne: true },
+    });
+    if (!activity) return next(AppError.notFound("Activity not found"));
+
+    const issue = await loadParentIssue(req, activity.issueId);
+    if (!issue) return next(AppError.notFound("Activity not found"));
+
+    if (!issueService.hasTeamWritePermission(req, issue.issueType)) {
+      return next(
+        AppError.forbidden("Not permitted to delete activities for issues of this type"),
+      );
+    }
+
+    activity.meta = { deleted: true, deletedAt: new Date(), deletedBy: userId };
+    await activity.save();
+
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "DELETED",
+      summary: `Deleted ${activityLabel(activity)}`,
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+    });
+
+    return res.status(200).json({ success: true, data: { _id: activity._id, deleted: true } });
+  } catch (error) {
+    if (error.name === "CastError") return next(AppError.notFound("Activity not found"));
+    return next(AppError.internalServerError(error.message || "Failed to delete activity"));
   }
 }
 
@@ -156,7 +247,11 @@ async function updateActivity(req, res, next) {
 async function downloadAttachment(req, res, next) {
   try {
     const { tenantId } = req.ctx;
-    const activity = await Activity.findOne({ _id: req.params.activityId, tenantId });
+    const activity = await Activity.findOne({
+      _id: req.params.activityId,
+      tenantId,
+      "meta.deleted": { $ne: true },
+    });
     if (!activity) return next(AppError.notFound("Attachment not found"));
 
     const issue = await loadParentIssue(req, activity.issueId);
@@ -234,6 +329,17 @@ async function uploadIssueAttachment(req, res, next) {
       ],
     });
 
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "CREATED",
+      summary: `Uploaded an attachment: ${req.file.originalname}`,
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers["x-user-email"] || null,
+    });
+
     return res.status(201).json({
       success: true,
       data: {
@@ -269,6 +375,7 @@ async function listIssueAttachments(req, res, next) {
     const activities = await Activity.find({
       tenantId,
       issueId: issue._id,
+      "meta.deleted": { $ne: true },
       "attachments.0": { $exists: true },
     }).sort({ createdAt: -1 });
 
@@ -293,11 +400,37 @@ async function listIssueAttachments(req, res, next) {
   }
 }
 
+/** CRM Case Details "History" section - replaces what was previously a hardcoded single
+ * mock entry with real HistoryEntry rows written by services/history.service.js#recordHistory
+ * (called from this file and issue.controller.js/issuePortal.controller.js wherever an
+ * Issue/Activity is created, updated, or deleted). */
+async function listHistory(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const issue = await loadParentIssue(req, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    if (!hasTeamReadPermission(req, issue.issueType)) {
+      return next(AppError.forbidden("Not permitted to view history for issues of this type"));
+    }
+
+    const history = await HistoryEntry.find({ tenantId, issueId: issue._id }).sort({
+      createdAt: -1,
+    });
+
+    return res.status(200).json({ success: true, data: history });
+  } catch (error) {
+    return next(AppError.internalServerError(error.message || "Failed to list history"));
+  }
+}
+
 module.exports = {
   createActivity,
   getActivities,
   updateActivity,
+  deleteActivity,
   downloadAttachment,
   uploadIssueAttachment,
   listIssueAttachments,
+  listHistory,
 };

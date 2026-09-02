@@ -5,6 +5,7 @@ const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
 const profileServiceClient = require("../services/profileService.client");
 const { uploadToBlob, getDownloadSasUrl, buildIssueAttachmentBlobPath } = require("../services/azure.blob.service");
+const { recordHistory } = require("../services/history.service");
 
 // Member-portal issue creation/self-service - a deliberately separate controller from
 // issue.controller.js/issueActivity.controller.js (CRM path), not a userType branch inside
@@ -111,6 +112,7 @@ async function fetchMyIssueAttachments(tenantId, issueId) {
     tenantId,
     issueId,
     visibleToMember: true,
+    "meta.deleted": { $ne: true },
     "attachments.0": { $exists: true },
   }).sort({ createdAt: -1 });
 
@@ -176,6 +178,17 @@ async function portalCreateIssue(req, res, next) {
 
     await issueService.publishIssueCreatedEvents(issue, { tenantId, userId, req });
 
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ISSUE",
+      entityId: issue._id,
+      action: "CREATED",
+      summary: "Issue created via member portal",
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers?.["x-user-email"] || null,
+    });
+
     return res.status(201).json({ success: true, data: issue });
   } catch (error) {
     if (error instanceof AppError) return next(error);
@@ -237,6 +250,7 @@ async function portalListMyIssueActivities(req, res, next) {
       tenantId,
       issueId: issue._id,
       visibleToMember: true,
+      "meta.deleted": { $ne: true },
     }).sort({ interactionDate: -1 });
 
     return res.status(200).json({ success: true, data: activities });
@@ -287,6 +301,17 @@ async function portalAddIssueComment(req, res, next) {
       attachments,
     });
 
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "CREATED",
+      summary: attachments.length > 0 ? "Member added a comment with an attachment" : "Member added a comment",
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers?.["x-user-email"] || null,
+    });
+
     return res.status(201).json({ success: true, data: activity });
   } catch (error) {
     if (error instanceof AppError) return next(error);
@@ -311,6 +336,7 @@ async function portalDownloadAttachment(req, res, next) {
       tenantId,
       issueId: issue._id,
       visibleToMember: true,
+      "meta.deleted": { $ne: true },
     });
     if (!activity) return next(AppError.notFound("Attachment not found"));
 

@@ -42,6 +42,16 @@ const ActivitySchema = new mongoose.Schema(
     // (controllers/issuePortal.controller.js#portalAddIssueComment) always set this true;
     // CRM can optionally set it true on its own createActivity calls to reply visibly.
     visibleToMember: { type: Boolean, default: false },
+
+    // Soft-delete, same pattern as Issue.meta (models/issue.model.js) - a deleted comment's
+    // content is preserved (not wiped) so services/history.service.js's DELETED entry can
+    // show what was actually deleted, not just that something was. Every list/read query
+    // must filter "meta.deleted": { $ne: true } to exclude these.
+    meta: {
+      deleted: { type: Boolean, default: false },
+      deletedAt: { type: Date, default: null },
+      deletedBy: { type: String, default: null },
+    },
   },
   { timestamps: true },
 );
@@ -50,6 +60,10 @@ const ActivitySchema = new mongoose.Schema(
 // audit/reporting, and notify the issue owner when someone else logs an activity and
 // hasn't opted out via sendNotification (plan §1.4).
 ActivitySchema.post("save", async function bumpIssueLastActivity(doc) {
+  // A soft-delete is also a .save() (flips meta.deleted) - it's not a new/updated activity
+  // for notification/reporting purposes, so skip every side effect below for it. The
+  // DELETED history entry is recorded separately by the controller, not this hook.
+  if (doc.meta?.deleted) return;
   try {
     const issue = await Issue.findByIdAndUpdate(
       doc.issueId,

@@ -22,6 +22,14 @@ jest.mock("../services/azure.blob.service", () => ({
   buildIssueAttachmentBlobPath: jest.fn(() => "issue-attachments/tenant-1/issue-1/uuid-file.pdf"),
 }));
 
+// recordHistory does real I/O (HistoryEntry.create) - mocked so it doesn't attempt a real
+// write (and log a stray "Cannot log after tests are done" warning once it inevitably fails
+// validation against these tests' non-ObjectId string ids) every time a portal handler
+// fires it in the background without being awaited.
+jest.mock("../services/history.service", () => ({
+  recordHistory: jest.fn(),
+}));
+
 const mockComplaintSave = jest.fn();
 jest.mock("../models/issue.complaint.model", () => {
   const MockComplaint = jest.fn().mockImplementation(function ctor(data) {
@@ -38,6 +46,7 @@ const Activity = require("../models/activity.model");
 const Complaint = require("../models/issue.complaint.model");
 const profileServiceClient = require("../services/profileService.client");
 const issueService = require("../services/issue.service");
+const historyService = require("../services/history.service");
 const issuePortalController = require("../controllers/issuePortal.controller");
 
 function makeRes() {
@@ -176,6 +185,9 @@ describe("issuePortal.controller portalCreateIssue", () => {
     expect(mockComplaintSave).toHaveBeenCalledTimes(1);
     expect(publishSpy).toHaveBeenCalledTimes(1);
     expect(res.status).toHaveBeenCalledWith(201);
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ISSUE", action: "CREATED" }),
+    );
   });
 
   it("ignores smuggled owner/priority/issueType/issueStatus fields", async () => {
@@ -384,5 +396,8 @@ describe("issuePortal.controller portalAddIssueComment", () => {
       }),
     );
     expect(res.status).toHaveBeenCalledWith(201);
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ACTIVITY", action: "CREATED" }),
+    );
   });
 });

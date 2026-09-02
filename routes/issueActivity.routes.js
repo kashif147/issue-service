@@ -24,6 +24,11 @@ router.put(
   defaultPolicyMiddleware.requirePermission("issues", "write"),
   issueActivityController.updateActivity,
 );
+router.delete(
+  "/activities/:activityId",
+  defaultPolicyMiddleware.requirePermission("issues", "write"),
+  issueActivityController.deleteActivity,
+);
 router.get(
   "/activities/:activityId/attachments/:index/download",
   defaultPolicyMiddleware.requirePermission("issues", "read"),
@@ -39,6 +44,11 @@ router.get(
   "/issues/:id/attachments",
   defaultPolicyMiddleware.requirePermission("issues", "read"),
   issueActivityController.listIssueAttachments,
+);
+router.get(
+  "/issues/:id/history",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueActivityController.listHistory,
 );
 
 module.exports = router;
