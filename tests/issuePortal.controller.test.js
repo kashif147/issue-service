@@ -20,6 +20,7 @@ jest.mock("../services/azure.blob.service", () => ({
   uploadToBlob: jest.fn(),
   getDownloadSasUrl: jest.fn(),
   buildIssueAttachmentBlobPath: jest.fn(() => "issue-attachments/tenant-1/issue-1/uuid-file.pdf"),
+  deleteBlob: jest.fn().mockResolvedValue(true),
 }));
 
 // recordHistory does real I/O (HistoryEntry.create) - mocked so it doesn't attempt a real
@@ -47,6 +48,7 @@ const Complaint = require("../models/issue.complaint.model");
 const profileServiceClient = require("../services/profileService.client");
 const issueService = require("../services/issue.service");
 const historyService = require("../services/history.service");
+const azureBlobService = require("../services/azure.blob.service");
 const issuePortalController = require("../controllers/issuePortal.controller");
 
 function makeRes() {
@@ -478,19 +480,17 @@ describe("issuePortal.controller portalUpdateComment", () => {
     );
   });
 
-  it("edits a comment even on a CLOSED issue (only new activities are blocked, not edits)", async () => {
+  it("400s when the issue is CLOSED", async () => {
     issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "CLOSED" });
-    const activitySave = jest.fn().mockResolvedValue(undefined);
-    const activity = { _id: "activity-1", body: "old", save: activitySave };
-    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    activityFindOneSpy = jest.spyOn(Activity, "findOne");
     const req = makeReq({ params: { id: "issue-1", activityId: "activity-1" }, body: { body: "edited comment" } });
     const res = makeRes();
     const next = jest.fn();
 
     await issuePortalController.portalUpdateComment(req, res, next);
 
-    expect(next).not.toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(200);
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(activityFindOneSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -556,5 +556,134 @@ describe("issuePortal.controller portalDeleteComment", () => {
     expect(historyService.recordHistory).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: "ACTIVITY", action: "DELETED" }),
     );
+  });
+});
+
+describe("issuePortal.controller portalRemoveAttachment", () => {
+  let issueFindOneSpy;
+  let activityFindOneSpy;
+
+  beforeEach(() => {
+    profileServiceClient.getMyProfile.mockResolvedValue({ profileId: "my-profile-id" });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    if (issueFindOneSpy) issueFindOneSpy.mockRestore();
+    if (activityFindOneSpy) activityFindOneSpy.mockRestore();
+  });
+
+  it("404s when the issue doesn't belong to the caller (or doesn't exist)", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "not-mine", activityId: "activity-1", index: "0" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalRemoveAttachment(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("404s when the comment doesn't exist or wasn't created by this caller", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "issue-1", activityId: "not-yours", index: "0" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalRemoveAttachment(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("404s when the attachment index doesn't exist", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const activity = { _id: "activity-1", body: "a comment", attachments: [], markModified: jest.fn(), save: jest.fn() };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1", index: "0" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalRemoveAttachment(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+    expect(azureBlobService.deleteBlob).not.toHaveBeenCalled();
+  });
+
+  it("removes the attachment and deletes its blob, keeping the comment when body text remains", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const activitySave = jest.fn().mockResolvedValue(undefined);
+    const activity = {
+      _id: "activity-1",
+      body: "a comment with a file",
+      attachments: [{ filename: "doc.pdf", blobPath: "issue-attachments/tenant-1/issue-1/uuid-doc.pdf" }],
+      markModified: jest.fn(),
+      save: activitySave,
+    };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1", index: "0" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalRemoveAttachment(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(azureBlobService.deleteBlob).toHaveBeenCalledWith("issue-attachments/tenant-1/issue-1/uuid-doc.pdf");
+    expect(activity.attachments).toEqual([]);
+    expect(activity.markModified).toHaveBeenCalledWith("attachments");
+    expect(activity.meta).toBeUndefined();
+    expect(activitySave).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ACTIVITY", action: "UPDATED" }),
+    );
+  });
+
+  it("soft-deletes the whole comment when removing the attachment leaves nothing meaningful behind", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const activitySave = jest.fn().mockResolvedValue(undefined);
+    const activity = {
+      _id: "activity-1",
+      body: null,
+      attachments: [{ filename: "doc.pdf", blobPath: "issue-attachments/tenant-1/issue-1/uuid-doc.pdf" }],
+      markModified: jest.fn(),
+      save: activitySave,
+    };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1", index: "0" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalRemoveAttachment(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(activity.meta.deleted).toBe(true);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, data: expect.objectContaining({ deleted: true }) }),
+    );
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ACTIVITY", action: "DELETED" }),
+    );
+  });
+
+  it("does not block removal on a CLOSED issue", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "CLOSED" });
+    const activitySave = jest.fn().mockResolvedValue(undefined);
+    const activity = {
+      _id: "activity-1",
+      body: "a comment with a file",
+      attachments: [{ filename: "doc.pdf", blobPath: "issue-attachments/tenant-1/issue-1/uuid-doc.pdf" }],
+      markModified: jest.fn(),
+      save: activitySave,
+    };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1", index: "0" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalRemoveAttachment(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 });

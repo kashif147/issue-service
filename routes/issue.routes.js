@@ -40,11 +40,11 @@ portalRouter.post(
   upload.single("file"),
   issuePortalController.portalAddIssueComment,
 );
-// Edit/delete a member's own comment (and, since attachments live on the same Activity
-// document, whatever attachment it carries) - never another author's, see
-// issuePortalController.loadMyOwnComment's createdBy check. Attachments aren't
+// Edit/delete a member's own comment - never another author's, see
+// issuePortalController.loadMyOwnComment's createdBy check. Editing is blocked once the
+// issue is CLOSED (same as creating a new comment); deleting is not. Attachments aren't
 // independently editable (no "replace this file" affordance anywhere in this service, CRM
-// included) - delete is the only way to remove one.
+// included) - portalRemoveAttachment below is the way to drop just one.
 portalRouter.put(
   "/:id/activities/:activityId",
   portalWrite,
@@ -54,6 +54,14 @@ portalRouter.delete(
   "/:id/activities/:activityId",
   portalWrite,
   issuePortalController.portalDeleteComment,
+);
+// Removes one attachment (and actually deletes its blob, unlike the soft-deletes above)
+// rather than the whole comment - no route-order concern vs. the ":activityId" delete
+// above, the extra path segments make them unambiguous either way.
+portalRouter.delete(
+  "/:id/activities/:activityId/attachments/:index",
+  portalWrite,
+  issuePortalController.portalRemoveAttachment,
 );
 portalRouter.get(
   "/:id/activities/:activityId/attachments/:index/download",

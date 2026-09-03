@@ -251,6 +251,41 @@
           }
         },
         {
+          "name": "Edit my comment",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Corrected: checking in on the status of my case (updated).\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities/{{activityId}}", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "activities", "{{activityId}}"] },
+            "description": "Edits the text of a comment the caller created themselves - 404s if activityId wasn't created by this caller (or doesn't exist / doesn't belong to this issue). Only `body` is editable - an attachment already on the comment can't be swapped in place, use 'Remove an attachment' for that. 400s if the issue is CLOSED - edits are blocked there, same as adding a new comment."
+          }
+        },
+        {
+          "name": "Delete my comment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities/{{activityId}}", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "activities", "{{activityId}}"] },
+            "description": "Soft-deletes a comment the caller created themselves (same ownership check/404 as Edit my comment). Since an attachment lives on the same Activity document as its comment, this also removes any attachment - content is preserved under meta.deleted for audit, blob storage untouched. Not blocked on a CLOSED issue."
+          }
+        },
+        {
+          "name": "Remove an attachment",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/issues/portal/{{issueId}}/activities/{{activityId}}/attachments/{{attachmentIndex}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["issues", "portal", "{{issueId}}", "activities", "{{activityId}}", "attachments", "{{attachmentIndex}}"]
+            },
+            "description": "Removes one attachment from a comment the caller created themselves (same ownership check/404 as Edit/Delete my comment). Unlike deleting the whole comment, this actually deletes the file from blob storage - it's gone for good. If nothing meaningful is left afterwards (no attachments and no body text), the whole comment is soft-deleted too. Not blocked on a CLOSED issue."
+          }
+        },
+        {
           "name": "Download my attachment",
           "request": {
             "method": "GET",

@@ -4,7 +4,12 @@ const Activity = require("../models/activity.model");
 const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
 const profileServiceClient = require("../services/profileService.client");
-const { uploadToBlob, getDownloadSasUrl, buildIssueAttachmentBlobPath } = require("../services/azure.blob.service");
+const {
+  uploadToBlob,
+  getDownloadSasUrl,
+  buildIssueAttachmentBlobPath,
+  deleteBlob,
+} = require("../services/azure.blob.service");
 const { recordHistory } = require("../services/history.service");
 
 // Member-portal issue creation/self-service - a deliberately separate controller from
@@ -393,15 +398,13 @@ async function loadMyOwnComment(tenantId, userId, issueId, activityId) {
 }
 
 /**
- * Edits the comment text of a member's own portal comment. Deliberately mirrors
- * issueActivity.controller.js's updateActivity in NOT blocking on issue.issueStatus ===
- * "CLOSED" (only portalAddIssueComment/createActivity block *new* activities on a closed
- * issue - correcting an existing comment's wording stays allowed either side of the app).
+ * Edits the comment text of a member's own portal comment. Blocked once the issue is
+ * CLOSED - same rule portalAddIssueComment already applies to *new* comments, extended here
+ * to edits too, so a closed issue's activity trail is frozen either way.
  *
  * Only `body` is editable - an attachment already on the comment can't be swapped in place
  * (same as CRM: there's no "replace this file" affordance anywhere in this service).
- * Deleting the comment (portalDeleteComment) is the only way to remove an attachment too,
- * since attachments live on the Activity document, not as a standalone entity.
+ * portalRemoveAttachment is the way to drop an attachment from a comment.
  */
 async function portalUpdateComment(req, res, next) {
   try {
@@ -410,6 +413,10 @@ async function portalUpdateComment(req, res, next) {
 
     const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
     if (!issue) return next(AppError.notFound("Issue not found"));
+
+    if (issue.issueStatus === "CLOSED") {
+      return next(AppError.badRequest("Cannot edit a comment on a closed issue"));
+    }
 
     const activity = await loadMyOwnComment(tenantId, userId, issue._id, req.params.activityId);
     if (!activity) return next(AppError.notFound("Comment not found"));
@@ -447,12 +454,11 @@ async function portalUpdateComment(req, res, next) {
 }
 
 /**
- * Soft-deletes a member's own portal comment (and, since attachments live on the same
- * Activity document, whatever attachment came with it - there's no way to delete just the
- * file while keeping the comment text, same as CRM's deleteActivity). Content is preserved
- * under meta.deleted, not wiped, matching the platform-wide soft-delete convention
- * (models/activity.model.js) - blob storage is untouched either way, so a later CRM review
- * of history can still resolve what was actually removed.
+ * Soft-deletes a member's own portal comment, including any attachments still on it.
+ * Content is preserved under meta.deleted, not wiped, matching the platform-wide
+ * soft-delete convention (models/activity.model.js) - blob storage is untouched either way,
+ * so a later CRM review of history can still resolve what was actually removed. To drop
+ * just one attachment and keep the rest of the comment, use portalRemoveAttachment instead.
  */
 async function portalDeleteComment(req, res, next) {
   try {
@@ -489,6 +495,72 @@ async function portalDeleteComment(req, res, next) {
   }
 }
 
+/**
+ * Removes a single attachment from a member's own portal comment. Unlike a soft-deleted
+ * comment (portalDeleteComment), whose blob is deliberately left in place for audit, an
+ * attachment the member explicitly removes is actually deleted from blob storage - it's the
+ * one operation in this file with a real "gone for good" side effect. If nothing meaningful
+ * is left on the comment afterwards (no attachments and no body text), the whole Activity is
+ * soft-deleted too, same as portalDeleteComment - an empty comment shell serves no purpose.
+ *
+ * Not blocked on a CLOSED issue - matches portalDeleteComment (removal isn't the same kind
+ * of ongoing edit that portalUpdateComment blocks there), only comment-text edits are.
+ */
+async function portalRemoveAttachment(req, res, next) {
+  try {
+    const { tenantId, userId } = req.ctx;
+    const my = await resolveMyProfileOrThrow(req, tenantId);
+
+    const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    const activity = await loadMyOwnComment(tenantId, userId, issue._id, req.params.activityId);
+    if (!activity) return next(AppError.notFound("Comment not found"));
+
+    const index = Number(req.params.index);
+    const attachments = Array.isArray(activity.attachments) ? activity.attachments : [];
+    const attachment = Number.isInteger(index) ? attachments[index] : null;
+    if (!attachment) return next(AppError.notFound("Attachment not found"));
+
+    if (attachment.blobPath) {
+      await deleteBlob(attachment.blobPath).catch((error) => {
+        console.error("[issuePortal] Failed to delete blob on attachment removal:", error.message);
+      });
+    }
+
+    attachments.splice(index, 1);
+    activity.markModified("attachments");
+
+    const nothingLeft = attachments.length === 0 && !hasMeaningfulText(activity.body);
+    if (nothingLeft) {
+      activity.meta = { deleted: true, deletedAt: new Date(), deletedBy: userId };
+    }
+    await activity.save();
+
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: nothingLeft ? "DELETED" : "UPDATED",
+      summary: nothingLeft
+        ? `Member removed an attachment (${attachment.filename}) and the now-empty comment`
+        : `Member removed an attachment (${attachment.filename})`,
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers?.["x-user-email"] || null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: { _id: activity._id, attachments: activity.attachments, deleted: nothingLeft },
+    });
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    if (error.name === "CastError") return next(AppError.notFound("Comment not found"));
+    return next(AppError.internalServerError(error.message || "Failed to remove attachment"));
+  }
+}
+
 module.exports = {
   portalCreateIssue,
   portalListMyIssues,
@@ -497,5 +569,6 @@ module.exports = {
   portalAddIssueComment,
   portalUpdateComment,
   portalDeleteComment,
+  portalRemoveAttachment,
   portalDownloadAttachment,
 };
