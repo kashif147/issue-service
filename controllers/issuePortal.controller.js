@@ -361,11 +361,141 @@ async function portalDownloadAttachment(req, res, next) {
   }
 }
 
+/**
+ * ReactQuill-style "empty" HTML (e.g. "<p><br></p>") is still truthy/non-blank as a raw
+ * string - strip tags before checking for real content. Same check as
+ * issueActivity.controller.js's hasMeaningfulText; duplicated locally rather than importing
+ * from the CRM controller, since this file is deliberately kept independent of it.
+ */
+function hasMeaningfulText(html) {
+  return String(html || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim().length > 0;
+}
+
+/**
+ * Own-comment lookup shared by portalUpdateComment/portalDeleteComment - 404s (never 403s)
+ * both when the activityId doesn't exist under this issue and when it exists but wasn't
+ * created by this caller, so a member can't distinguish "not yours" from "doesn't exist"
+ * (same not-found-not-forbidden convention loadMyIssue uses one level up).
+ *
+ * createdBy is compared against req.ctx.userId (the authenticated user, set on create by
+ * portalAddIssueComment/portalUpdateComment - see there), not profileId - this is what
+ * naturally excludes CRM-authored activities a team member flagged visibleToMember:true,
+ * since those carry a CRM user's userId, never this member's.
+ */
+async function loadMyOwnComment(tenantId, userId, issueId, activityId) {
+  return Activity.findOne({
+    _id: activityId,
+    tenantId,
+    issueId,
+    createdBy: userId,
+    "meta.deleted": { $ne: true },
+  });
+}
+
+/**
+ * Edits the comment text of a member's own portal comment. Deliberately mirrors
+ * issueActivity.controller.js's updateActivity in NOT blocking on issue.issueStatus ===
+ * "CLOSED" (only portalAddIssueComment/createActivity block *new* activities on a closed
+ * issue - correcting an existing comment's wording stays allowed either side of the app).
+ *
+ * Only `body` is editable - an attachment already on the comment can't be swapped in place
+ * (same as CRM: there's no "replace this file" affordance anywhere in this service).
+ * Deleting the comment (portalDeleteComment) is the only way to remove an attachment too,
+ * since attachments live on the Activity document, not as a standalone entity.
+ */
+async function portalUpdateComment(req, res, next) {
+  try {
+    const { tenantId, userId } = req.ctx;
+    const my = await resolveMyProfileOrThrow(req, tenantId);
+
+    const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    const activity = await loadMyOwnComment(tenantId, userId, issue._id, req.params.activityId);
+    if (!activity) return next(AppError.notFound("Comment not found"));
+
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, "body")) {
+      return next(AppError.badRequest("body is required"));
+    }
+    if (!hasMeaningfulText(req.body.body)) {
+      return next(AppError.badRequest("Comment text is required"));
+    }
+
+    activity.body = req.body.body;
+    await activity.save();
+
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "UPDATED",
+      summary: "Member edited their comment",
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers?.["x-user-email"] || null,
+    });
+
+    return res.status(200).json({ success: true, data: activity });
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    if (error.name === "ValidationError") {
+      return next(AppError.badRequest(error.message));
+    }
+    if (error.name === "CastError") return next(AppError.notFound("Comment not found"));
+    return next(AppError.internalServerError(error.message || "Failed to update comment"));
+  }
+}
+
+/**
+ * Soft-deletes a member's own portal comment (and, since attachments live on the same
+ * Activity document, whatever attachment came with it - there's no way to delete just the
+ * file while keeping the comment text, same as CRM's deleteActivity). Content is preserved
+ * under meta.deleted, not wiped, matching the platform-wide soft-delete convention
+ * (models/activity.model.js) - blob storage is untouched either way, so a later CRM review
+ * of history can still resolve what was actually removed.
+ */
+async function portalDeleteComment(req, res, next) {
+  try {
+    const { tenantId, userId } = req.ctx;
+    const my = await resolveMyProfileOrThrow(req, tenantId);
+
+    const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    const activity = await loadMyOwnComment(tenantId, userId, issue._id, req.params.activityId);
+    if (!activity) return next(AppError.notFound("Comment not found"));
+
+    activity.meta = { deleted: true, deletedAt: new Date(), deletedBy: userId };
+    await activity.save();
+
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "DELETED",
+      summary: activity.attachments?.length
+        ? "Member deleted their comment and attachment"
+        : "Member deleted their comment",
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers?.["x-user-email"] || null,
+    });
+
+    return res.status(200).json({ success: true, data: { _id: activity._id, deleted: true } });
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    if (error.name === "CastError") return next(AppError.notFound("Comment not found"));
+    return next(AppError.internalServerError(error.message || "Failed to delete comment"));
+  }
+}
+
 module.exports = {
   portalCreateIssue,
   portalListMyIssues,
   portalGetMyIssueById,
   portalListMyIssueActivities,
   portalAddIssueComment,
+  portalUpdateComment,
+  portalDeleteComment,
   portalDownloadAttachment,
 };

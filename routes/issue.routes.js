@@ -40,6 +40,21 @@ portalRouter.post(
   upload.single("file"),
   issuePortalController.portalAddIssueComment,
 );
+// Edit/delete a member's own comment (and, since attachments live on the same Activity
+// document, whatever attachment it carries) - never another author's, see
+// issuePortalController.loadMyOwnComment's createdBy check. Attachments aren't
+// independently editable (no "replace this file" affordance anywhere in this service, CRM
+// included) - delete is the only way to remove one.
+portalRouter.put(
+  "/:id/activities/:activityId",
+  portalWrite,
+  issuePortalController.portalUpdateComment,
+);
+portalRouter.delete(
+  "/:id/activities/:activityId",
+  portalWrite,
+  issuePortalController.portalDeleteComment,
+);
 portalRouter.get(
   "/:id/activities/:activityId/attachments/:index/download",
   portalRead,

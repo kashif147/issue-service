@@ -401,3 +401,160 @@ describe("issuePortal.controller portalAddIssueComment", () => {
     );
   });
 });
+
+describe("issuePortal.controller portalUpdateComment", () => {
+  let issueFindOneSpy;
+  let activityFindOneSpy;
+
+  beforeEach(() => {
+    profileServiceClient.getMyProfile.mockResolvedValue({ profileId: "my-profile-id" });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    if (issueFindOneSpy) issueFindOneSpy.mockRestore();
+    if (activityFindOneSpy) activityFindOneSpy.mockRestore();
+  });
+
+  it("404s when the issue doesn't belong to the caller (or doesn't exist)", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "not-mine", activityId: "activity-1" }, body: { body: "edited" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUpdateComment(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("404s when the comment doesn't exist or wasn't created by this caller", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "issue-1", activityId: "not-yours" }, body: { body: "edited" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUpdateComment(req, res, next);
+
+    expect(activityFindOneSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: "not-yours", issueId: "issue-1", createdBy: "user-1" }),
+    );
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("400s when body is missing or blank", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const activitySave = jest.fn();
+    activityFindOneSpy = jest
+      .spyOn(Activity, "findOne")
+      .mockResolvedValue({ _id: "activity-1", body: "old", save: activitySave });
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1" }, body: { body: "  " } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUpdateComment(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(activitySave).not.toHaveBeenCalled();
+  });
+
+  it("edits the comment body and records history", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const activitySave = jest.fn().mockResolvedValue(undefined);
+    const activity = { _id: "activity-1", body: "old", save: activitySave };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1" }, body: { body: "edited comment" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUpdateComment(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(activity.body).toBe("edited comment");
+    expect(activitySave).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ACTIVITY", action: "UPDATED" }),
+    );
+  });
+
+  it("edits a comment even on a CLOSED issue (only new activities are blocked, not edits)", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "CLOSED" });
+    const activitySave = jest.fn().mockResolvedValue(undefined);
+    const activity = { _id: "activity-1", body: "old", save: activitySave };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1" }, body: { body: "edited comment" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUpdateComment(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+});
+
+describe("issuePortal.controller portalDeleteComment", () => {
+  let issueFindOneSpy;
+  let activityFindOneSpy;
+
+  beforeEach(() => {
+    profileServiceClient.getMyProfile.mockResolvedValue({ profileId: "my-profile-id" });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    if (issueFindOneSpy) issueFindOneSpy.mockRestore();
+    if (activityFindOneSpy) activityFindOneSpy.mockRestore();
+  });
+
+  it("404s when the issue doesn't belong to the caller (or doesn't exist)", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "not-mine", activityId: "activity-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalDeleteComment(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("404s when the comment doesn't exist or wasn't created by this caller", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "issue-1", activityId: "not-yours" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalDeleteComment(req, res, next);
+
+    expect(activityFindOneSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: "not-yours", issueId: "issue-1", createdBy: "user-1" }),
+    );
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("soft-deletes the comment and records history", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const activitySave = jest.fn().mockResolvedValue(undefined);
+    const activity = { _id: "activity-1", attachments: [], meta: { deleted: false }, save: activitySave };
+    activityFindOneSpy = jest.spyOn(Activity, "findOne").mockResolvedValue(activity);
+    const req = makeReq({ params: { id: "issue-1", activityId: "activity-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalDeleteComment(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(activity.meta.deleted).toBe(true);
+    expect(activity.meta.deletedBy).toBe("user-1");
+    expect(activitySave).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, data: { _id: "activity-1", deleted: true } }),
+    );
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ACTIVITY", action: "DELETED" }),
+    );
+  });
+});
