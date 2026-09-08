@@ -45,6 +45,7 @@ jest.mock("../models/issue.complaint.model", () => {
 const Issue = require("../models/issue.model");
 const Activity = require("../models/activity.model");
 const Complaint = require("../models/issue.complaint.model");
+const HistoryEntry = require("../models/historyEntry.model");
 const profileServiceClient = require("../services/profileService.client");
 const issueService = require("../services/issue.service");
 const historyService = require("../services/history.service");
@@ -685,5 +686,105 @@ describe("issuePortal.controller portalRemoveAttachment", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+});
+
+describe("issuePortal.controller portalGetMyIssueHistory", () => {
+  let issueFindOneSpy;
+  let historyFindSpy;
+  let activityFindSpy;
+
+  beforeEach(() => {
+    profileServiceClient.getMyProfile.mockResolvedValue({ profileId: "my-profile-id" });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    if (issueFindOneSpy) issueFindOneSpy.mockRestore();
+    if (historyFindSpy) historyFindSpy.mockRestore();
+    if (activityFindSpy) activityFindSpy.mockRestore();
+  });
+
+  function mockHistoryFind(entries) {
+    historyFindSpy = jest.spyOn(HistoryEntry, "find").mockReturnValue({
+      sort: jest.fn().mockResolvedValue(entries),
+    });
+  }
+
+  function mockActivityFind(activities) {
+    activityFindSpy = jest.spyOn(Activity, "find").mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(activities),
+      }),
+    });
+  }
+
+  it("404s when the issue doesn't belong to the caller (or doesn't exist)", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue(null);
+    const req = makeReq({ params: { id: "not-mine" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueHistory(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("returns ISSUE-type entries unfiltered", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    activityFindSpy = jest.spyOn(Activity, "find");
+    mockHistoryFind([
+      { entityType: "ISSUE", entityId: "issue-1", action: "CREATED", summary: "Issue created" },
+      { entityType: "ISSUE", entityId: "issue-1", action: "UPDATED", summary: "issueStatus: ACTIVE -> RESOLVED" },
+    ]);
+    const req = makeReq({ params: { id: "issue-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueHistory(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(activityFindSpy).not.toHaveBeenCalled();
+    const data = res.json.mock.calls[0][0].data;
+    expect(data).toHaveLength(2);
+  });
+
+  it("drops ACTIVITY-type entries for activities that are not currently visibleToMember", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    mockHistoryFind([
+      { entityType: "ACTIVITY", entityId: "internal-activity", action: "CREATED", summary: "Logged a CALL activity" },
+      { entityType: "ACTIVITY", entityId: "member-activity", action: "CREATED", summary: "Member added a comment" },
+    ]);
+    mockActivityFind([{ _id: "member-activity" }]);
+    const req = makeReq({ params: { id: "issue-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueHistory(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(activityFindSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: { $in: ["internal-activity", "member-activity"] },
+        visibleToMember: true,
+      }),
+    );
+    const data = res.json.mock.calls[0][0].data;
+    expect(data).toHaveLength(1);
+    expect(data[0].entityId).toBe("member-activity");
+  });
+
+  it("skips the Activity lookup entirely when there are no ACTIVITY-type entries", async () => {
+    issueFindOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    activityFindSpy = jest.spyOn(Activity, "find");
+    mockHistoryFind([{ entityType: "ISSUE", entityId: "issue-1", action: "CREATED", summary: "Issue created" }]);
+    const req = makeReq({ params: { id: "issue-1" } });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalGetMyIssueHistory(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(activityFindSpy).not.toHaveBeenCalled();
   });
 });

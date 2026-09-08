@@ -34,6 +34,17 @@ portalRouter.get(
   portalRead,
   issuePortalController.portalListMyIssueActivities,
 );
+// Member-safe counterpart to issueActivity.routes.js's CRM-only "/issues/:id/history" -
+// ISSUE-type entries are shown unfiltered (the member already sees the full current Issue
+// document via GET /:id, so a diff of the same fields isn't a new leak), but ACTIVITY-type
+// entries are filtered to only activities that are *currently* visibleToMember:true - see
+// issuePortalController.portalGetMyIssueHistory's doc comment for why that has to be a live
+// re-check rather than trusting anything cached on the HistoryEntry row itself.
+portalRouter.get(
+  "/:id/history",
+  portalRead,
+  issuePortalController.portalGetMyIssueHistory,
+);
 portalRouter.post(
   "/:id/activities",
   portalWrite,

@@ -224,6 +224,15 @@
           }
         },
         {
+          "name": "Get my issue's history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/history", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "history"] },
+            "description": "Member-safe counterpart to the CRM 'List issue history' endpoint. ISSUE-type entries (issue created, field changes) are shown unfiltered - the member already sees the full current Issue document via 'Get my issue by id'. ACTIVITY-type entries (comments/attachments/CRM notes) are filtered live to only activities that are currently visibleToMember:true, so an internal-only CRM note's history never appears, even as a one-line summary."
+          }
+        },
+        {
           "name": "Add comment (text only)",
           "request": {
             "method": "POST",

@@ -1,6 +1,7 @@
 const Issue = require("../models/issue.model");
 const Complaint = require("../models/issue.complaint.model");
 const Activity = require("../models/activity.model");
+const HistoryEntry = require("../models/historyEntry.model");
 const { AppError } = require("../errors/AppError");
 const issueService = require("../services/issue.service");
 const profileServiceClient = require("../services/profileService.client");
@@ -263,6 +264,57 @@ async function portalListMyIssueActivities(req, res, next) {
     if (error instanceof AppError) return next(error);
     if (error.name === "CastError") return next(AppError.notFound("Issue not found"));
     return next(AppError.internalServerError(error.message || "Failed to list activities"));
+  }
+}
+
+/**
+ * Member-safe counterpart to issueActivity.controller.js's CRM-only listHistory.
+ *
+ * ISSUE-type entries are returned unfiltered: portalGetMyIssueById already hands the member
+ * the full current Issue document (issue.toObject(), no field allowlist), so a diff summary
+ * over those same fields isn't exposing anything the member couldn't already see.
+ *
+ * ACTIVITY-type entries are the actual privacy boundary - HistoryEntry has no
+ * visibleToMember of its own (it's not derived from the Activity at write time, and
+ * visibleToMember can change after the fact, e.g. CRM toggling an internal note visible
+ * later), so this re-checks each referenced activity's *current* visibleToMember live
+ * rather than trusting anything on the history row - the same live-recheck reasoning
+ * fetchMyIssueAttachments/portalListMyIssueActivities already apply, extended to history so
+ * a member can never see that an internal-only activity (a CRM call log, an internal note
+ * edit/delete, etc.) exists at all, even as a one-line summary.
+ */
+async function portalGetMyIssueHistory(req, res, next) {
+  try {
+    const { tenantId } = req.ctx;
+    const my = await resolveMyProfileOrThrow(req, tenantId);
+
+    const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    const history = await HistoryEntry.find({ tenantId, issueId: issue._id }).sort({ createdAt: -1 });
+
+    const activityIds = [
+      ...new Set(history.filter((entry) => entry.entityType === "ACTIVITY").map((entry) => String(entry.entityId))),
+    ];
+    const visibleActivityIds = activityIds.length
+      ? new Set(
+          (
+            await Activity.find({ _id: { $in: activityIds }, tenantId, visibleToMember: true })
+              .select("_id")
+              .lean()
+          ).map((activity) => String(activity._id)),
+        )
+      : new Set();
+
+    const filtered = history.filter(
+      (entry) => entry.entityType === "ISSUE" || visibleActivityIds.has(String(entry.entityId)),
+    );
+
+    return res.status(200).json({ success: true, data: filtered });
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    if (error.name === "CastError") return next(AppError.notFound("Issue not found"));
+    return next(AppError.internalServerError(error.message || "Failed to fetch history"));
   }
 }
 
@@ -566,6 +618,7 @@ module.exports = {
   portalListMyIssues,
   portalGetMyIssueById,
   portalListMyIssueActivities,
+  portalGetMyIssueHistory,
   portalAddIssueComment,
   portalUpdateComment,
   portalDeleteComment,
