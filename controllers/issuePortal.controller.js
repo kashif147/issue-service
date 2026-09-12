@@ -380,6 +380,94 @@ async function portalAddIssueComment(req, res, next) {
   }
 }
 
+/**
+ * Attachment-only upload for the member portal - no comment text required, unlike
+ * portalAddIssueComment above (which needs a body OR a file). Accepts one or more files
+ * under the "files" field (routes/issue.routes.js's upload.array("files", 10)) and stores
+ * them all on a single new Activity, same NOTE-with-no-body shape
+ * issueActivity.controller.js#uploadIssueAttachment uses on the CRM side - except
+ * visibleToMember/sendNotification are both true here (a member's own upload), where the
+ * CRM route defaults both false (an internal document upload the member shouldn't be
+ * pinged about or see attributed strangely).
+ */
+async function portalUploadAttachments(req, res, next) {
+  try {
+    const { tenantId, userId } = req.ctx;
+    const my = await resolveMyProfileOrThrow(req, tenantId);
+
+    const issue = await loadMyIssue(tenantId, my.profileId, req.params.id);
+    if (!issue) return next(AppError.notFound("Issue not found"));
+
+    if (issue.issueStatus === "CLOSED") {
+      return next(AppError.badRequest("Cannot add an attachment to a closed issue"));
+    }
+
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (files.length === 0) {
+      return next(AppError.badRequest("At least one attachment is required"));
+    }
+
+    const attachments = [];
+    for (const file of files) {
+      const blobPath = buildIssueAttachmentBlobPath(tenantId, issue._id, file.originalname);
+      await uploadToBlob(blobPath, file.buffer, file.mimetype, file.originalname);
+      attachments.push({
+        filename: file.originalname,
+        blobPath,
+        contentType: file.mimetype,
+        size: file.size,
+      });
+    }
+
+    const activity = await Activity.create({
+      tenantId,
+      issueId: issue._id,
+      activityType: "NOTE",
+      body: null,
+      createdBy: userId,
+      visibleToMember: true,
+      sendNotification: true,
+      attachments,
+    });
+
+    recordHistory({
+      tenantId,
+      issueId: issue._id,
+      entityType: "ACTIVITY",
+      entityId: activity._id,
+      action: "CREATED",
+      summary:
+        attachments.length === 1
+          ? `Member uploaded an attachment: ${attachments[0].filename}`
+          : `Member uploaded ${attachments.length} attachments`,
+      actorId: userId,
+      actorEmail: req.user?.email || req.headers?.["x-user-email"] || null,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        activityId: activity._id,
+        attachments: attachments.map((attachment, index) => ({
+          activityId: activity._id,
+          index,
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          size: attachment.size,
+          uploadedAt: activity.createdAt,
+        })),
+      },
+    });
+  } catch (error) {
+    if (error instanceof AppError) return next(error);
+    if (error.name === "ValidationError") {
+      return next(AppError.badRequest(error.message));
+    }
+    if (error.name === "CastError") return next(AppError.notFound("Issue not found"));
+    return next(AppError.internalServerError(error.message || "Failed to upload attachments"));
+  }
+}
+
 async function portalDownloadAttachment(req, res, next) {
   try {
     const { tenantId } = req.ctx;
@@ -620,6 +708,7 @@ module.exports = {
   portalListMyIssueActivities,
   portalGetMyIssueHistory,
   portalAddIssueComment,
+  portalUploadAttachments,
   portalUpdateComment,
   portalDeleteComment,
   portalRemoveAttachment,

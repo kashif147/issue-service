@@ -260,6 +260,22 @@
           }
         },
         {
+          "name": "Upload attachments (portal, no comment required)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": [] },
+                { "key": "files", "type": "file", "src": [] }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/issues/portal/{{issueId}}/attachments", "host": ["{{baseUrl}}"], "path": ["issues", "portal", "{{issueId}}", "attachments"] },
+            "description": "Attachment-only upload - no comment text required, unlike 'Add comment with attachment' above. Accepts 1-10 files under the repeated `files` form field (multer upload.array(\"files\", 10)); Postman lets you attach multiple files to the same key by adding more rows with the same key name. Stores them all on a single new visibleToMember:true NOTE activity. 400s if the issue is CLOSED or no files are attached."
+          }
+        },
+        {
           "name": "Edit my comment",
           "request": {
             "method": "PUT",
@@ -379,6 +395,15 @@
               "host": ["{{baseUrl}}"],
               "path": ["activities", "{{activityId}}", "attachments", "{{attachmentIndex}}", "download"]
             }
+          }
+        },
+        {
+          "name": "List issue history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/issues/{{issueId}}/history", "host": ["{{baseUrl}}"], "path": ["issues", "{{issueId}}", "history"] },
+            "description": "Full, unfiltered ISSUE + ACTIVITY history entries for CRM - the counterpart the member-portal 'Get my issue's history' endpoint filters ACTIVITY entries against (visibleToMember)."
           }
         }
       ]

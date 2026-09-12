@@ -60,11 +60,12 @@ function makeRes() {
   return res;
 }
 
-function makeReq({ body = {}, params = {}, tenantId = "tenant-1", userId = "user-1", file } = {}) {
+function makeReq({ body = {}, params = {}, tenantId = "tenant-1", userId = "user-1", file, files } = {}) {
   return {
     body,
     params,
     file,
+    files,
     ctx: { tenantId, userId },
     user: { email: "member@example.com" },
   };
@@ -399,6 +400,106 @@ describe("issuePortal.controller portalAddIssueComment", () => {
       }),
     );
     expect(res.status).toHaveBeenCalledWith(201);
+    expect(historyService.recordHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ entityType: "ACTIVITY", action: "CREATED" }),
+    );
+  });
+});
+
+describe("issuePortal.controller portalUploadAttachments", () => {
+  let findOneSpy;
+
+  beforeEach(() => {
+    profileServiceClient.getMyProfile.mockResolvedValue({ profileId: "my-profile-id" });
+    jest.spyOn(Activity, "create").mockResolvedValue({ _id: "activity-1", createdAt: new Date("2026-01-01") });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    if (findOneSpy) findOneSpy.mockRestore();
+  });
+
+  it("400s when the issue is CLOSED", async () => {
+    findOneSpy = jest
+      .spyOn(Issue, "findOne")
+      .mockResolvedValue({ _id: "issue-1", issueStatus: "CLOSED" });
+    const req = makeReq({
+      params: { id: "issue-1" },
+      files: [{ originalname: "a.pdf", buffer: Buffer.from(""), mimetype: "application/pdf", size: 10 }],
+    });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUploadAttachments(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(Activity.create).not.toHaveBeenCalled();
+  });
+
+  it("400s when no files are provided", async () => {
+    findOneSpy = jest
+      .spyOn(Issue, "findOne")
+      .mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const req = makeReq({ params: { id: "issue-1" }, files: [] });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUploadAttachments(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(Activity.create).not.toHaveBeenCalled();
+  });
+
+  it("404s when the issue doesn't belong to the caller (or doesn't exist)", async () => {
+    findOneSpy = jest.spyOn(Issue, "findOne").mockResolvedValue(null);
+    const req = makeReq({
+      params: { id: "not-mine" },
+      files: [{ originalname: "a.pdf", buffer: Buffer.from(""), mimetype: "application/pdf", size: 10 }],
+    });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUploadAttachments(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  it("uploads every file to blob storage and stores them all on one visibleToMember NOTE activity, without requiring a comment", async () => {
+    findOneSpy = jest
+      .spyOn(Issue, "findOne")
+      .mockResolvedValue({ _id: "issue-1", issueStatus: "ACTIVE" });
+    const req = makeReq({
+      params: { id: "issue-1" },
+      files: [
+        { originalname: "a.pdf", buffer: Buffer.from("a"), mimetype: "application/pdf", size: 10 },
+        { originalname: "b.png", buffer: Buffer.from("b"), mimetype: "image/png", size: 20 },
+      ],
+    });
+    const res = makeRes();
+    const next = jest.fn();
+
+    await issuePortalController.portalUploadAttachments(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(azureBlobService.uploadToBlob).toHaveBeenCalledTimes(2);
+    expect(Activity.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issueId: "issue-1",
+        activityType: "NOTE",
+        body: null,
+        visibleToMember: true,
+        sendNotification: true,
+        attachments: [
+          expect.objectContaining({ filename: "a.pdf" }),
+          expect.objectContaining({ filename: "b.png" }),
+        ],
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+    const responseData = res.json.mock.calls[0][0].data;
+    expect(responseData.attachments).toHaveLength(2);
+    expect(responseData.attachments[0]).toMatchObject({ filename: "a.pdf", index: 0 });
+    expect(responseData.attachments[1]).toMatchObject({ filename: "b.png", index: 1 });
     expect(historyService.recordHistory).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: "ACTIVITY", action: "CREATED" }),
     );

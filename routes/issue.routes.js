@@ -51,6 +51,19 @@ portalRouter.post(
   upload.single("file"),
   issuePortalController.portalAddIssueComment,
 );
+// Attachment-only upload - no comment text required, unlike portalAddIssueComment above
+// (which needs a body OR a file). Mirrors issueActivity.routes.js's CRM-only
+// "/issues/:id/attachments" (issueActivity.controller.js#uploadIssueAttachment), but
+// accepts multiple files in one call (up to 10) rather than a single file, and marks the
+// resulting Activity visibleToMember: true / sendNotification: true since it's the member's
+// own upload (the CRM route defaults both the other way - see that controller's doc
+// comment). Distinct path from "/:id/activities" - no route-order concern.
+portalRouter.post(
+  "/:id/attachments",
+  portalWrite,
+  upload.array("files", 10),
+  issuePortalController.portalUploadAttachments,
+);
 // Edit/delete a member's own comment - never another author's, see
 // issuePortalController.loadMyOwnComment's createdBy check. Editing is blocked once the
 // issue is CLOSED (same as creating a new comment); deleting is not. Attachments aren't
