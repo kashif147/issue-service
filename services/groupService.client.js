@@ -17,6 +17,7 @@ function buildHeaders(req, tenantId) {
   }
   for (const key of [
     "x-jwt-verified",
+    "x-correlation-id",
     "x-auth-source",
     "x-user-id",
     "x-user-email",
