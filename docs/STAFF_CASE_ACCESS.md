@@ -1,6 +1,6 @@
 # Staff self-service case access (MembersHub) - permission proposal
 
-Status: **proposal** (2026-10-21). No grant has been run and user-service is unchanged.
+Status: **design approved for review** (decisions 2026-10-21: IR-only creation, created-by/assigned-to reads, owner-only update/complete). No grant has been run and user-service is unchanged.
 Branch `feature/staff-case-lists`.
 
 ## What the code requires today
@@ -46,7 +46,7 @@ issue-service rather than by the team resources:
 |---|---|---|
 | `GET /issues/mine` | `issues-own:read` | `createdBy = me` OR `owner.userId = me`, **any** type: a staff member always sees what they logged or were assigned |
 | `GET /issues/mine/:id` | same | same |
-| `POST /issues/mine` | `issues-own:write` | `issueType` ∈ the tenant's MembersHub case types (config; default `["IR"]`). `createdBy = me`. Owner is auto-routed (IR) or defaults to me |
+| `POST /issues/mine` | `issues-own:write` | `issueType` must be `IR` (first release; anything else is `400 ISSUE_TYPE_NOT_ALLOWED`). `createdBy = me`. Owner auto-routed to the member's IRO; if none, me |
 | `PUT /issues/mine/:id` | `issues-own:write` | `owner.userId = me` (assigned) - creators who aren't the owner are read-only |
 | `PUT /issues/mine/:id/status` (complete) | `issues-own:write` | `owner.userId = me`; `CLOSED` requires a resolution as today |
 | `POST /issues/mine/:id/activities` | `issues-own:write` | `createdBy = me` OR `owner.userId = me` |
@@ -78,5 +78,35 @@ Nothing else changes: no base `issues:*`, no team resources, no change to any ot
    another staff member's case is a 404 (not a 403, so existence isn't confirmed); a
    self-targeted complaint stays hidden; `POST /mine` with a disallowed type is a 400.
 
-Separate existing gap (not caused by this work): `POST /issues` doesn't check
-`issues-<team>:write`, so base `issues:write` can create a case of any type.
+## The missing team-write check
+
+Every issue write path checks `issues-<team>:write` for the case's type, **except
+`POST /issues` (`createIssue`)**. It only has the route-level `issues:write`. Checked across
+`issue.controller.js` (update, status, delete) and `issueActivity.controller.js` (activity
+create/update/delete, attachment upload).
+
+How the design handles it:
+
+1. **`POST /issues/mine`** never relies on the route gate alone. It enforces its own type
+   allowlist (`IR`) and the row-level owner rules, so the `issues-own:write` grant can't be
+   used to create other types.
+2. **`POST /issues` (existing CRM route)**: add
+   `if (!issueService.hasTeamWritePermission(req, issueType)) return next(AppError.forbidden(...))`
+   after the `issueType` validation, mirroring `updateIssue`. This is a behaviour change for any
+   role holding base `issues:write` without the matching team write (per the grant script, every
+   `category:"CRM"` role, e.g. REO). It ships with the issues-own change, after the primary
+   session confirms nothing relies on the gap, and is listed as a dependency rather than fixed
+   unilaterally.
+
+Tests for 2: a base-write-only caller gets 403 for every type; a team writer can create only
+their own team's type; GS/DGS (`*` / all teams) are unaffected.
+
+## Base `issues:read` must not expose other staff cases
+
+- IRO/BO/RO get **no** base `issues:*` grant in this design, so `GET /issues`, `/issues/search`
+  and `/issues/:id` stay closed to them.
+- `issues-own` routes are row-scoped in the query itself (`createdBy`/`owner.userId` = the
+  trusted user id), not in the permission. Holding `issues-own:read` never widens a query.
+- The `/mine` route already on this branch (`71ed890`) is gated on `issues:read` and filtered by
+  the caller's own id, so it shows only their own cases. It switches to `issues-own:read` as part
+  of the change below.
