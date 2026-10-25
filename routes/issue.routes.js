@@ -7,6 +7,14 @@ const { upload } = require("../middlewares/upload.mw.js");
 
 router.get("/", defaultPolicyMiddleware.requirePermission("issues", "read"), issueController.listIssues);
 
+// Caller's own cases (created by / assigned to them) - registered before "/:id" for the same
+// reason as "/search" below.
+router.get(
+  "/mine",
+  defaultPolicyMiddleware.requirePermission("issues", "read"),
+  issueController.listMyIssues,
+);
+
 // Must be registered before "/:id" - Express matches routes in registration order, and
 // "/:id" would otherwise swallow "/search" as an :id value of "search".
 router.get(

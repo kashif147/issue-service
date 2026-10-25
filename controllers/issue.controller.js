@@ -107,6 +107,84 @@ async function listIssues(req, res, next) {
   }
 }
 
+const MINE_SCOPES = ["all", "created", "assigned"];
+const MINE_MAX_LIMIT = 100;
+
+/**
+ * GET /issues/mine - the caller's own cases for MembersHub/CRM: cases they created
+ * (createdBy) and/or cases assigned to them (owner.userId). The user is always req.ctx.userId -
+ * there is deliberately no userId param. Built on baseListFilter, so tenant scoping,
+ * team visibility (getAllowedIssueTypes) and complaint-hide all apply exactly as in listIssues.
+ *
+ * Query: scope=all|created|assigned (default all), state=open|closed (open = not CLOSED),
+ * issueType, priority, issueStatus, page, limit (max 100). Response meta carries the total
+ * for the current filter plus created/assigned counts of open cases for dashboard badges.
+ */
+async function listMyIssues(req, res, next) {
+  try {
+    const { userId } = req.ctx;
+    if (!userId) return next(AppError.unauthorized("User context required"));
+
+    const { issueType, priority, issueStatus, state } = req.query;
+    const scope = String(req.query.scope || "all").toLowerCase();
+    if (!MINE_SCOPES.includes(scope)) {
+      return next(AppError.badRequest(`scope must be one of ${MINE_SCOPES.join(", ")}`));
+    }
+    if (state && !["open", "closed"].includes(state)) {
+      return next(AppError.badRequest("state must be open or closed"));
+    }
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), MINE_MAX_LIMIT);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+
+    const base = baseListFilter(req);
+    const allowedTypes = issueService.getAllowedIssueTypes(req);
+    if (issueType && allowedTypes.includes(issueType)) base.issueType = issueType;
+    if (priority) base.priority = String(priority);
+
+    const createdClause = { createdBy: String(userId) };
+    const assignedClause = { "owner.userId": String(userId) };
+    const scopeClause =
+      scope === "created"
+        ? createdClause
+        : scope === "assigned"
+          ? assignedClause
+          : { $or: [createdClause, assignedClause] };
+
+    const filter = { ...base, ...scopeClause };
+    if (issueStatus) filter.issueStatus = String(issueStatus);
+    else if (state === "open") filter.issueStatus = { $ne: "CLOSED" };
+    else if (state === "closed") filter.issueStatus = "CLOSED";
+
+    const openBase = { ...base, issueStatus: { $ne: "CLOSED" } };
+    const [issues, total, createdOpen, assignedOpen] = await Promise.all([
+      Issue.aggregate([
+        { $match: filter },
+        ...priorityThenCreatedSortStages(),
+        { $skip: (page - 1) * limit },
+        { $limit: limit },
+      ]),
+      Issue.countDocuments(filter),
+      Issue.countDocuments({ ...openBase, ...createdClause }),
+      Issue.countDocuments({ ...openBase, ...assignedClause }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: issues,
+      meta: {
+        scope,
+        page,
+        limit,
+        total,
+        openCounts: { created: createdOpen, assigned: assignedOpen },
+      },
+    });
+  } catch (error) {
+    return next(AppError.internalServerError(error.message || "Failed to list cases"));
+  }
+}
+
 /**
  * GET /issues/search?q= - "Find Issues" (requirements doc: "User should be able to find a
  * query or issue by a variety of criteria. Including Unique reference number, membership
@@ -477,6 +555,7 @@ async function softDeleteIssue(req, res, next) {
 
 module.exports = {
   listIssues,
+  listMyIssues,
   searchIssues,
   getIssueById,
   createIssue,
