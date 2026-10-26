@@ -1,10 +1,9 @@
 const axios = require("axios");
 const mongoose = require("mongoose");
 
-// Generic client for user-service's Lookup/LookupType system. Copies the
-// resolve-type-by-code -> cache -> fetch by-type/:id/hierarchy -> filter client-side
-// pattern from profile-service/services/lookup.service.client.js (there is no server-side
-// search param on user-service's Lookup API - confirmed by reading its controller). Used
+// Generic client for user-service's Lookup/LookupType system: fetch a type's lookups by the
+// type's stable code (GET /api/lookup/by-type-code/:code/hierarchy, Phase A / A10) and filter
+// client-side (there is no server-side search param on user-service's Lookup API). Used
 // for two things (plan §1.1):
 //   - Issue Designations dropdown (LookupType code "ISSUEDESG") - no local model, this is
 //     the only source of truth.
@@ -14,23 +13,37 @@ const mongoose = require("mongoose");
 const USER_SERVICE_URL =
   process.env.USER_SERVICE_URL || process.env.POLICY_SERVICE_URL || "http://user-service:5001";
 
-const LOOKUP_TYPE_CACHE_TTL_MS = 5 * 60 * 1000;
-// Short negative-cache TTL for a failed/unreachable resolution, so a struggling user-service
-// doesn't get hit with a fresh GET /api/lookuptype on every single dropdown load while it's
-// down - each of the 4 lookup endpoints (issue-types/issue-statuses/origins/issue-sources)
-// resolves at least one type code per call, so without this a bad patch of requests compounds.
-const LOOKUP_TYPE_FAILURE_CACHE_TTL_MS = 15 * 1000;
-const lookupTypeIdCache = new Map(); // code -> { id, expiry } | { failed: true, expiry }
+// Phase A / A11: no process-global code -> lookup-type-id cache any more (it was shared by every
+// tenant). user-service resolves the code and caches the result per trusted tenant
+// (lookuptype:v2:<tenantId>:code:<CODE>); a 404 (unknown code) maps to an empty list.
+const PLACEHOLDER_TENANTS = ["default", "unknown", "system", "null", "undefined"];
 
 const normalizeKey = (value) =>
   String(value || "")
     .trim()
     .toLowerCase();
 
+const cleanTenant = (value) => {
+  const t = value == null ? "" : String(value).trim();
+  return t && !PLACEHOLDER_TENANTS.includes(t.toLowerCase()) ? t : "";
+};
+
+/**
+ * The tenant for an outbound lookup call: the caller's tenant, which must agree with the request's
+ * trusted tenant when there is a request. Missing/placeholder/disagreeing -> "" (no call is made).
+ */
+function resolveLookupTenant(req, tenantId) {
+  const tenant = cleanTenant(tenantId);
+  if (!tenant) return "";
+  const trusted = cleanTenant(req?.ctx?.tenantId || req?.tenantId || req?.user?.tenantId);
+  if (trusted && trusted !== tenant) return "";
+  return tenant;
+}
+
 function buildHeaders(req, tenantId) {
   const headers = {
     "Content-Type": "application/json",
-    "x-tenant-id": tenantId || "",
+    "x-tenant-id": resolveLookupTenant(req, tenantId),
     "x-internal-request": "true",
   };
   if (req?.headers?.authorization) {
@@ -63,49 +76,13 @@ function unwrapLookupPayload(payload) {
   return payload;
 }
 
-async function getLookupTypeIdByCode(code, headers) {
-  const cached = lookupTypeIdCache.get(code);
-  if (cached && Date.now() < cached.expiry) {
-    return cached.failed ? null : cached.id;
-  }
-
-  try {
-    const base = USER_SERVICE_URL.replace(/\/$/, "");
-    const response = await axios.get(`${base}/api/lookuptype`, {
-      headers,
-      timeout: 8000,
-      validateStatus: (status) => status < 500,
-    });
-
-    if (response.status < 200 || response.status >= 300) {
-      lookupTypeIdCache.set(code, { failed: true, expiry: Date.now() + LOOKUP_TYPE_FAILURE_CACHE_TTL_MS });
-      return null;
-    }
-
-    const types = Array.isArray(response.data) ? response.data : response.data?.data || [];
-    const match = types.find((type) => type?.code === code);
-    if (!match?._id) {
-      lookupTypeIdCache.set(code, { failed: true, expiry: Date.now() + LOOKUP_TYPE_FAILURE_CACHE_TTL_MS });
-      return null;
-    }
-
-    lookupTypeIdCache.set(code, { id: String(match._id), expiry: Date.now() + LOOKUP_TYPE_CACHE_TTL_MS });
-    return String(match._id);
-  } catch (error) {
-    // Network error/timeout reaching user-service - short negative-cache rather than
-    // propagating, so callers get a clean empty result and the next attempt is rate-limited.
-    lookupTypeIdCache.set(code, { failed: true, expiry: Date.now() + LOOKUP_TYPE_FAILURE_CACHE_TTL_MS });
-    return null;
-  }
-}
-
 async function fetchLookupsByTypeCode(code, headers) {
-  const typeId = await getLookupTypeIdByCode(code, headers);
-  if (!typeId) return [];
+  // Fail closed: never resolve tenant metadata without a trusted tenant.
+  if (!headers?.["x-tenant-id"]) return [];
 
   try {
     const base = USER_SERVICE_URL.replace(/\/$/, "");
-    const response = await axios.get(`${base}/api/lookup/by-type/${typeId}/hierarchy`, {
+    const response = await axios.get(`${base}/api/lookup/by-type-code/${encodeURIComponent(code)}/hierarchy`, {
       headers,
       timeout: 15000,
       validateStatus: (status) => status < 500,
@@ -117,13 +94,14 @@ async function fetchLookupsByTypeCode(code, headers) {
     return results.map(unwrapLookupPayload);
   } catch (error) {
     // Network error/timeout reaching user-service - degrade to an empty list rather than
-    // propagating, matching getLookupTypeIdByCode's failure handling above.
+    // propagating.
     return [];
   }
 }
 
 async function fetchLookupById(id, headers) {
   if (!id || !mongoose.Types.ObjectId.isValid(id)) return null;
+  if (!headers?.["x-tenant-id"]) return null;
   const base = USER_SERVICE_URL.replace(/\/$/, "");
   const response = await axios.get(`${base}/api/lookup/${id}`, {
     headers,
@@ -327,6 +305,7 @@ async function fetchResolutions(issueTypeCode, options = {}) {
 
 module.exports = {
   buildHeaders,
+  resolveLookupTenant,
   fetchLookupsByTypeCode,
   findWorkLocationLookup,
   searchIssueDesignations,
