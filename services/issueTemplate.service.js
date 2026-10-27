@@ -1,6 +1,11 @@
 const mongoose = require("mongoose");
 const Template = require("../models/template.model");
 const { AppError } = require("../errors/AppError");
+const {
+  assertSharedTemplateDeleteAllowed,
+  assertSharedTemplateUpdateAllowed,
+  isFrozenSharedTemplate,
+} = require("./sharedTemplateFreeze");
 
 // Copied verbatim (shape-for-shape) from events-service's services/eventTemplate.service.js
 // per plan §1.2/§4.4 item 1 - only the default templateType changed ("eventssummary" ->
@@ -211,12 +216,17 @@ class IssueTemplateService {
         ? templateType
         : template.templateType || "issuessummary";
 
-    if (template.systemDefault && !allowSystemDefaultEdits) {
+    // Phase A / A14: a shared (null-tenant) default is write-frozen - 423 on any real change; the
+    // per-user isDefault preference still works and the shared row itself is never saved.
+    assertSharedTemplateUpdateAllowed(template, updateData);
+    const sharedFrozen = isFrozenSharedTemplate(template);
+
+    if (template.systemDefault && (!allowSystemDefaultEdits || sharedFrozen)) {
       if (isDefault === true) {
         await clearSisterIsDefaultFlags(userId, type, null, tenantId);
       }
       if (pinned !== undefined) template.pinned = pinned;
-      const saved = await template.save();
+      const saved = sharedFrozen ? template : await template.save();
       const response = toTemplateResponse(saved);
       if (isDefault === true) response.isDefault = true;
       return response;
@@ -265,6 +275,7 @@ class IssueTemplateService {
       throw AppError.notFound("Filter template not found");
     }
 
+    assertSharedTemplateDeleteAllowed(template); // Phase A / A14: shared default -> 423
     template.meta.deleted = true;
     template.meta.deletedAt = new Date();
 
