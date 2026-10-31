@@ -4,12 +4,11 @@ RUN apk add --no-cache curl git
 
 WORKDIR /app
 
-# package-lock.json is deliberately NOT copied here - see events-service's Dockerfile for
-# why (reifying it with --omit=dev triggers a reproducible npm bug in a clean container).
-# Resolving fresh from package.json avoids it; the git dependencies are already pinned to
-# branches for reproducibility.
-COPY package.json ./
-RUN npm install --omit=dev
+# Dependencies install from the committed lockfile (npm ci), so source + lockfile + image describe the
+# same dependency set. The July 2026 workaround (package.json only + npm install) is retired: the npm
+# reify crash with --omit=dev no longer reproduces with the reconciled lockfile in this pinned base image.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY . .
 
