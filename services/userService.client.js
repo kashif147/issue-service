@@ -55,7 +55,38 @@ async function getUsersByRoleIds(roleIds, { req, tenantId } = {}) {
   }
 }
 
+const USER_LOOKUP_CHUNK = 500;
+
+/**
+ * Id -> { _id, fullName, email } for CRM/portal users referenced on issues (createdBy,
+ * owner.userId, resolvedByUserId, ...), via user-service's POST /api/users/lookup (gated on
+ * issues:read, scoped to the caller's own tenant). Chunked at that endpoint's 500-id cap.
+ * Best-effort: [] on error, so callers keep the raw ids.
+ */
+async function lookupUserNames(userIds, { req, tenantId } = {}) {
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean).map(String))];
+  if (ids.length === 0) return [];
+  const base = USER_SERVICE_URL.replace(/\/$/, "");
+  const results = [];
+  for (let i = 0; i < ids.length; i += USER_LOOKUP_CHUNK) {
+    try {
+      const response = await axios.post(
+        `${base}/api/users/lookup`,
+        { ids: ids.slice(i, i + USER_LOOKUP_CHUNK) },
+        { headers: buildHeaders(req, tenantId), timeout: 15000, validateStatus: (status) => status < 500 },
+      );
+      if (response.status < 400 && Array.isArray(response.data?.data)) {
+        results.push(...response.data.data);
+      }
+    } catch (error) {
+      console.error("[userService.client] lookupUserNames failed:", error.message);
+    }
+  }
+  return results;
+}
+
 module.exports = {
   buildHeaders,
   getUsersByRoleIds,
+  lookupUserNames,
 };
