@@ -1,0 +1,307 @@
+{
+  "version": 1,
+  "source": {
+    "repo": "ProjectShell-1",
+    "path": "src/config/grid-column-defaults.json",
+    "commit": "7983fed",
+    "pages": [
+      "issuesclosed",
+      "issuescomplaints",
+      "issuesftp",
+      "issuesir",
+      "issuesdataprotection"
+    ],
+    "pagesSha256": "bd5256d3372e7b57042837d0e0b0ca2d0cf83ff1aec23667a34586b43a7cccb4"
+  },
+  "templates": {
+    "issuesclosed": {
+      "name": "System default",
+      "templateType": "issuesclosed",
+      "columns": [
+        "caseTitle",
+        "memberIds",
+        "membershipNo",
+        "caseFileNumber",
+        "nmbiReference",
+        "location",
+        "dateReceived",
+        "criteriaLetterStatus",
+        "legislation",
+        "issueStatus",
+        "priority",
+        "ownerName",
+        "ownerTeam",
+        "createdBy"
+      ],
+      "columnLabels": {
+        "caseTitle": "Issue",
+        "memberIds": "Member Name",
+        "membershipNo": "Membership No",
+        "caseFileNumber": "Case File Number",
+        "nmbiReference": "NMBI Reference No",
+        "location": "Location",
+        "dateReceived": "Date Received",
+        "criteriaLetterStatus": "Criteria Letter",
+        "legislation": "Legislation",
+        "issueStatus": "Case Status",
+        "priority": "Priority",
+        "ownerName": "Owner",
+        "ownerTeam": "Team",
+        "createdBy": "Created By"
+      },
+      "filters": {
+        "priority": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "issueType": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "issueStatus": {
+          "operator": "equal_to",
+          "values": [
+            "CLOSED"
+          ]
+        },
+        "ownerTeam": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "dateReceived": {
+          "operator": "between",
+          "values": []
+        }
+      },
+      "visibleFilters": []
+    },
+    "issuescomplaints": {
+      "name": "System default",
+      "templateType": "issuescomplaints",
+      "columns": [
+        "caseTitle",
+        "memberIds",
+        "membershipNo",
+        "caseFileNumber",
+        "nmbiReference",
+        "location",
+        "dateReceived",
+        "criteriaLetterStatus",
+        "legislation",
+        "issueStatus",
+        "priority",
+        "ownerName",
+        "ownerTeam",
+        "createdBy"
+      ],
+      "columnLabels": {
+        "caseTitle": "Issue",
+        "memberIds": "Member Name",
+        "membershipNo": "Membership No",
+        "caseFileNumber": "Case File Number",
+        "nmbiReference": "NMBI Reference No",
+        "location": "Location",
+        "dateReceived": "Date Received",
+        "criteriaLetterStatus": "Criteria Letter",
+        "legislation": "Legislation",
+        "issueStatus": "Case Status",
+        "priority": "Priority",
+        "ownerName": "Owner",
+        "ownerTeam": "Team",
+        "createdBy": "Created By"
+      },
+      "filters": {
+        "priority": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "issueStatus": {
+          "operator": "not_equal_to",
+          "values": [
+            "CLOSED"
+          ]
+        },
+        "ownerTeam": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "dateReceived": {
+          "operator": "between",
+          "values": []
+        }
+      },
+      "visibleFilters": []
+    },
+    "issuesftp": {
+      "name": "System default",
+      "templateType": "issuesftp",
+      "columns": [
+        "caseTitle",
+        "memberIds",
+        "membershipNo",
+        "caseFileNumber",
+        "nmbiReference",
+        "location",
+        "dateReceived",
+        "criteriaLetterStatus",
+        "legislation",
+        "issueStatus",
+        "priority",
+        "ownerName",
+        "ownerTeam",
+        "createdBy"
+      ],
+      "columnLabels": {
+        "caseTitle": "Issue",
+        "memberIds": "Member Name",
+        "membershipNo": "Membership No",
+        "caseFileNumber": "Case File Number",
+        "nmbiReference": "NMBI Reference No",
+        "location": "Location",
+        "dateReceived": "Date Received",
+        "criteriaLetterStatus": "Criteria Letter",
+        "legislation": "Legislation",
+        "issueStatus": "Case Status",
+        "priority": "Priority",
+        "ownerName": "Owner",
+        "ownerTeam": "Team",
+        "createdBy": "Created By"
+      },
+      "filters": {
+        "priority": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "issueStatus": {
+          "operator": "not_equal_to",
+          "values": [
+            "CLOSED"
+          ]
+        },
+        "ownerTeam": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "dateReceived": {
+          "operator": "between",
+          "values": []
+        }
+      },
+      "visibleFilters": []
+    },
+    "issuesir": {
+      "name": "System default",
+      "templateType": "issuesir",
+      "columns": [
+        "caseTitle",
+        "memberIds",
+        "membershipNo",
+        "caseFileNumber",
+        "nmbiReference",
+        "location",
+        "dateReceived",
+        "criteriaLetterStatus",
+        "legislation",
+        "issueStatus",
+        "priority",
+        "ownerName",
+        "ownerTeam",
+        "createdBy"
+      ],
+      "columnLabels": {
+        "caseTitle": "Issue",
+        "memberIds": "Member Name",
+        "membershipNo": "Membership No",
+        "caseFileNumber": "Case File Number",
+        "nmbiReference": "NMBI Reference No",
+        "location": "Location",
+        "dateReceived": "Date Received",
+        "criteriaLetterStatus": "Criteria Letter",
+        "legislation": "Legislation",
+        "issueStatus": "Case Status",
+        "priority": "Priority",
+        "ownerName": "Owner",
+        "ownerTeam": "Team",
+        "createdBy": "Created By"
+      },
+      "filters": {
+        "priority": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "issueStatus": {
+          "operator": "not_equal_to",
+          "values": [
+            "CLOSED"
+          ]
+        },
+        "ownerTeam": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "dateReceived": {
+          "operator": "between",
+          "values": []
+        }
+      },
+      "visibleFilters": []
+    },
+    "issuesdataprotection": {
+      "name": "System default",
+      "templateType": "issuesdataprotection",
+      "columns": [
+        "caseTitle",
+        "memberIds",
+        "membershipNo",
+        "caseFileNumber",
+        "nmbiReference",
+        "location",
+        "dateReceived",
+        "criteriaLetterStatus",
+        "legislation",
+        "issueStatus",
+        "priority",
+        "ownerName",
+        "ownerTeam",
+        "createdBy"
+      ],
+      "columnLabels": {
+        "caseTitle": "Issue",
+        "memberIds": "Member Name",
+        "membershipNo": "Membership No",
+        "caseFileNumber": "Case File Number",
+        "nmbiReference": "NMBI Reference No",
+        "location": "Location",
+        "dateReceived": "Date Received",
+        "criteriaLetterStatus": "Criteria Letter",
+        "legislation": "Legislation",
+        "issueStatus": "Case Status",
+        "priority": "Priority",
+        "ownerName": "Owner",
+        "ownerTeam": "Team",
+        "createdBy": "Created By"
+      },
+      "filters": {
+        "priority": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "issueStatus": {
+          "operator": "not_equal_to",
+          "values": [
+            "CLOSED"
+          ]
+        },
+        "ownerTeam": {
+          "operator": "equal_to",
+          "values": []
+        },
+        "dateReceived": {
+          "operator": "between",
+          "values": []
+        }
+      },
+      "visibleFilters": []
+    }
+  }
+}
