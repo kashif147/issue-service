@@ -207,8 +207,14 @@ exports.getDefaultTemplate = async (req, res, next) => {
     if (!assertCrmUser(req, next)) return;
     const { creatorId, tenantId } = requestContext(req);
 
-    const template = await issueTemplateService.getDefaultTemplate(creatorId, tenantId);
-    return res.status(200).json({ success: true, data: template });
+    // Read-only: resolves the user's default, else the system default, else null (= the client's
+    // built-in default). Never creates a view.
+    const { source, template } = await issueTemplateService.getDefaultTemplate(
+      creatorId,
+      tenantId,
+      req.query.type || req.query.templateType || "issuessummary",
+    );
+    return res.status(200).json({ success: true, data: template, source });
   } catch (error) {
     return next(error);
   }
