@@ -83,7 +83,8 @@ async function hydrateIssueNames(issues, { req, tenantId } = {}) {
   const userNameById = new Map(
     (Array.isArray(users) ? users : []).map((user) => [
       String(user._id),
-      user.fullName || user.email || null,
+      // Display name only; user-service no longer returns email and it is never a fallback.
+      (typeof user.fullName === "string" && user.fullName.trim()) || null,
     ]),
   );
   const userName = (id) => {

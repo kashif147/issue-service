@@ -57,11 +57,16 @@ async function getUsersByRoleIds(roleIds, { req, tenantId } = {}) {
 
 const USER_LOOKUP_CHUNK = 500;
 
+// Display-name enrichment is non-critical: a slow or failing user-service must not hold the
+// issue response for long. Bounded per call (default 3 s).
+const NAME_LOOKUP_TIMEOUT_MS = Number(process.env.ISSUE_NAME_LOOKUP_TIMEOUT_MS) || 3000;
+
 /**
- * Id -> { _id, fullName, email } for CRM/portal users referenced on issues (createdBy,
- * owner.userId, resolvedByUserId, ...), via user-service's POST /api/users/lookup (gated on
- * issues:read, scoped to the caller's own tenant). Chunked at that endpoint's 500-id cap.
- * Best-effort: [] on error, so callers keep the raw ids.
+ * Id -> { _id, fullName } for CRM/portal users referenced on issues (createdBy, owner.userId,
+ * resolvedByUserId, ...), via user-service's POST /api/users/lookup. That endpoint trusts only
+ * the caller's verified user JWT (the forwarded Authorization header), from which it takes the
+ * tenant and checks issues:read - forwarded x-user-* headers are ignored there. Chunked at the
+ * endpoint's 500-id cap. Best-effort: [] on error/timeout, so callers keep the raw ids.
  */
 async function lookupUserNames(userIds, { req, tenantId } = {}) {
   const ids = [...new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean).map(String))];
@@ -73,13 +78,13 @@ async function lookupUserNames(userIds, { req, tenantId } = {}) {
       const response = await axios.post(
         `${base}/api/users/lookup`,
         { ids: ids.slice(i, i + USER_LOOKUP_CHUNK) },
-        { headers: buildHeaders(req, tenantId), timeout: 15000, validateStatus: (status) => status < 500 },
+        { headers: buildHeaders(req, tenantId), timeout: NAME_LOOKUP_TIMEOUT_MS, validateStatus: (status) => status < 500 },
       );
       if (response.status < 400 && Array.isArray(response.data?.data)) {
         results.push(...response.data.data);
       }
     } catch (error) {
-      console.error("[userService.client] lookupUserNames failed:", error.message);
+      console.error("[userService.client] lookupUserNames failed", { code: error.code || null, status: error.response?.status || null });
     }
   }
   return results;
@@ -89,4 +94,5 @@ module.exports = {
   buildHeaders,
   getUsersByRoleIds,
   lookupUserNames,
+  NAME_LOOKUP_TIMEOUT_MS,
 };

@@ -123,6 +123,8 @@ async function getProfilesBatch(profileIds, { req, tenantId } = {}) {
 }
 
 const BATCH_LOOKUP_CHUNK = 5000;
+// Display-name enrichment is non-critical: bounded per call (default 3 s).
+const NAME_LOOKUP_TIMEOUT_MS = Number(process.env.ISSUE_NAME_LOOKUP_TIMEOUT_MS) || 3000;
 
 /**
  * Lean batch lookup for display hydration (member names on issue list/detail responses) -
@@ -141,13 +143,13 @@ async function lookupProfilesByIds(profileIds, { req, tenantId } = {}) {
       const response = await axios.post(
         `${base}/api/profile/batch-lookup`,
         { profileIds: ids.slice(i, i + BATCH_LOOKUP_CHUNK) },
-        { headers: buildHeaders(req, tenantId), timeout: 15000, validateStatus: (status) => status < 500 },
+        { headers: buildHeaders(req, tenantId), timeout: NAME_LOOKUP_TIMEOUT_MS, validateStatus: (status) => status < 500 },
       );
       if (response.status < 400 && Array.isArray(response.data?.data)) {
         results.push(...response.data.data);
       }
     } catch (error) {
-      console.error("[profileService.client] lookupProfilesByIds failed:", error.message);
+      console.error("[profileService.client] lookupProfilesByIds failed", { code: error.code || null, status: error.response?.status || null });
     }
   }
   return results;

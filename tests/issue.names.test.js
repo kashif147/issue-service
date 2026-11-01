@@ -104,8 +104,8 @@ describe("hydrateIssueNames", () => {
     expect(c.complaintAgainstUserName).toBe("Sam Staff");
     expect(c.createdByName).toBe("Kate Creator");
     expect(c.ownerName).toBe("Olly Owner");
-    // No fullName on the user record -> falls back to email.
-    expect(c.resolvedByName).toBe("rita@x");
+    // No fullName on the user record -> null; email is never used as a display name.
+    expect(c.resolvedByName).toBeNull();
 
     expect(i.members).toEqual([{ profileId: P_UNKNOWN, fullName: null, membershipNumber: null }]);
     expect(i.createdByName).toBeNull();
@@ -136,6 +136,31 @@ describe("hydrateIssueNames", () => {
     expect(c.complainantName).toBeNull();
     expect(c.createdByName).toBeNull();
     expect(c.createdBy).toBe(ME);
+  });
+
+  it("never uses or exposes an email, even if a lookup returned one", async () => {
+    const out = await hydrateIssueNames([complaint], { req: makeReq(), tenantId: A });
+    expect(JSON.stringify(out)).not.toMatch(/@x/);
+  });
+
+  it("partial failure: user lookup down -> member names still resolved, user names null, ids intact", async () => {
+    userServiceClient.lookupUserNames.mockRejectedValue(new Error("timeout"));
+    const [c] = await hydrateIssueNames([complaint], { req: makeReq(), tenantId: A });
+    expect(c.memberNames).toEqual(["Mary Smith", "Tom Jones"]);
+    expect([c.createdByName, c.ownerName, c.resolvedByName, c.complaintAgainstUserName]).toEqual([null, null, null, null]);
+    expect([c.createdBy, c.owner.userId, c.resolvedByUserId, c.complaintAgainstUserId]).toEqual([ME, OWNER, RESOLVER, STAFF_SUBJECT]);
+  });
+
+  it("preserves issue and member order regardless of lookup response order", async () => {
+    profileServiceClient.lookupProfilesByIds.mockResolvedValue([
+      { _id: P1, personalInfo: { fullName: "Mary Smith" } },
+      { _id: P2, personalInfo: { fullName: "Tom Jones" } },
+    ]);
+    const reversed = { ...complaint, _id: "c9", memberIds: [P2, P1] };
+    const out = await hydrateIssueNames([reversed, complaint], { req: makeReq(), tenantId: A });
+    expect(out.map((x) => x._id)).toEqual(["c9", "c1"]);
+    expect(out[0].memberNames).toEqual(["Tom Jones", "Mary Smith"]);
+    expect(out[0].complainantName).toBe("Tom Jones");
   });
 
   it("makes no calls when there is nothing to resolve", async () => {
@@ -183,6 +208,15 @@ describe("issue.controller responses carry names", () => {
     });
   });
 
+  it("visibility first: an issue the caller cannot see (no match in the tenant/visibility filter) -> 404 and no name lookup", async () => {
+    findOneSpy.mockResolvedValue(null);
+    const next = jest.fn();
+    await issueController.getIssueById(makeReq({ params: { id: "c1" } }), makeRes(), next);
+    expect(next.mock.calls[0][0].status || next.mock.calls[0][0].statusCode).toBe(404);
+    expect(profileServiceClient.lookupProfilesByIds).not.toHaveBeenCalled();
+    expect(userServiceClient.lookupUserNames).not.toHaveBeenCalled();
+  });
+
   it("getIssueById", async () => {
     const res = makeRes();
     const next = jest.fn();
@@ -195,7 +229,17 @@ describe("issue.controller responses carry names", () => {
       memberNames: ["Mary Smith", "Tom Jones"],
       createdByName: "Kate Creator",
       ownerName: "Olly Owner",
-      resolvedByName: "rita@x",
+      resolvedByName: null,
     });
+  });
+});
+
+describe("issue routes: permission check runs before the controller (and so before enrichment)", () => {
+  it("every enriched read route is behind requirePermission", () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../routes/issue.routes.js"), "utf8");
+    for (const [path, handler] of [["/", "listIssues"], ["/mine", "listMyIssues"], ["/:id", "getIssueById"]]) {
+      const re = new RegExp(`router\\.get\\(\\s*"${path.replace("/", "\\/")}",[\\s\\S]*?requirePermission\\([^)]*\\)[\\s\\S]*?issueController\\.${handler}`);
+      expect(src).toMatch(re);
+    }
   });
 });
