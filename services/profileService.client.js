@@ -122,6 +122,39 @@ async function getProfilesBatch(profileIds, { req, tenantId } = {}) {
   }
 }
 
+const BATCH_LOOKUP_CHUNK = 5000;
+// Display-name enrichment is non-critical: bounded per call (default 3 s).
+const NAME_LOOKUP_TIMEOUT_MS = Number(process.env.ISSUE_NAME_LOOKUP_TIMEOUT_MS) || 3000;
+
+/**
+ * Lean batch lookup for display hydration (member names on issue list/detail responses) -
+ * backed by profile-service's authenticated `POST /api/profile/batch-lookup`
+ * (getProfilesBatchAuthenticated there), which projects BATCH_PROFILE_LOOKUP_SELECT and fills
+ * personalInfo.fullName, rather than `/batch`'s full documents. Tenant comes from the
+ * forwarded caller identity. Chunked at that endpoint's 5000-id cap. Best-effort: [] on error.
+ */
+async function lookupProfilesByIds(profileIds, { req, tenantId } = {}) {
+  const ids = [...new Set((Array.isArray(profileIds) ? profileIds : []).filter(Boolean).map(String))];
+  if (ids.length === 0) return [];
+  const base = PROFILE_SERVICE_URL.replace(/\/$/, "");
+  const results = [];
+  for (let i = 0; i < ids.length; i += BATCH_LOOKUP_CHUNK) {
+    try {
+      const response = await axios.post(
+        `${base}/api/profile/batch-lookup`,
+        { profileIds: ids.slice(i, i + BATCH_LOOKUP_CHUNK) },
+        { headers: buildHeaders(req, tenantId), timeout: NAME_LOOKUP_TIMEOUT_MS, validateStatus: (status) => status < 500 },
+      );
+      if (response.status < 400 && Array.isArray(response.data?.data)) {
+        results.push(...response.data.data);
+      }
+    } catch (error) {
+      console.error("[profileService.client] lookupProfilesByIds failed", { code: error.code || null, status: error.response?.status || null });
+    }
+  }
+  return results;
+}
+
 /**
  * professionalDetails.workLocation for a given profile - the first hop of IRO resolution
  * (services/iroResolution.service.js, owned by a separate parallel workstream, resolves the
@@ -139,5 +172,6 @@ module.exports = {
   getMyProfile,
   getProfileById,
   getProfilesBatch,
+  lookupProfilesByIds,
   getProfessionalDetails,
 };

@@ -55,7 +55,44 @@ async function getUsersByRoleIds(roleIds, { req, tenantId } = {}) {
   }
 }
 
+const USER_LOOKUP_CHUNK = 500;
+
+// Display-name enrichment is non-critical: a slow or failing user-service must not hold the
+// issue response for long. Bounded per call (default 3 s).
+const NAME_LOOKUP_TIMEOUT_MS = Number(process.env.ISSUE_NAME_LOOKUP_TIMEOUT_MS) || 3000;
+
+/**
+ * Id -> { _id, fullName } for CRM/portal users referenced on issues (createdBy, owner.userId,
+ * resolvedByUserId, ...), via user-service's POST /api/users/lookup. That endpoint trusts only
+ * the caller's verified user JWT (the forwarded Authorization header), from which it takes the
+ * tenant and checks issues:read - forwarded x-user-* headers are ignored there. Chunked at the
+ * endpoint's 500-id cap. Best-effort: [] on error/timeout, so callers keep the raw ids.
+ */
+async function lookupUserNames(userIds, { req, tenantId } = {}) {
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : []).filter(Boolean).map(String))];
+  if (ids.length === 0) return [];
+  const base = USER_SERVICE_URL.replace(/\/$/, "");
+  const results = [];
+  for (let i = 0; i < ids.length; i += USER_LOOKUP_CHUNK) {
+    try {
+      const response = await axios.post(
+        `${base}/api/users/lookup`,
+        { ids: ids.slice(i, i + USER_LOOKUP_CHUNK) },
+        { headers: buildHeaders(req, tenantId), timeout: NAME_LOOKUP_TIMEOUT_MS, validateStatus: (status) => status < 500 },
+      );
+      if (response.status < 400 && Array.isArray(response.data?.data)) {
+        results.push(...response.data.data);
+      }
+    } catch (error) {
+      console.error("[userService.client] lookupUserNames failed", { code: error.code || null, status: error.response?.status || null });
+    }
+  }
+  return results;
+}
+
 module.exports = {
   buildHeaders,
   getUsersByRoleIds,
+  lookupUserNames,
+  NAME_LOOKUP_TIMEOUT_MS,
 };

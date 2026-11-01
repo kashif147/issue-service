@@ -10,6 +10,7 @@ const issueService = require("../services/issue.service");
 const issueEvents = require("../rabbitMQ/publishers/issue.events.publisher.js");
 const { publishSafely } = require("../utils/publishSafely");
 const profileServiceClient = require("../services/profileService.client");
+const { hydrateIssueNames } = require("../services/issueNames.service");
 const { recordHistory, summarizeObjectDiff } = require("../services/history.service");
 
 // Every publish below is best-effort: a RabbitMQ hiccup must never fail the HTTP response
@@ -101,7 +102,8 @@ async function listIssues(req, res, next) {
       ...priorityThenCreatedSortStages(),
     ]);
 
-    return res.status(200).json({ success: true, data: issues });
+    const data = await hydrateIssueNames(issues, { req, tenantId: req.ctx.tenantId });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     return next(AppError.internalServerError(error.message || "Failed to list issues"));
   }
@@ -169,9 +171,10 @@ async function listMyIssues(req, res, next) {
       Issue.countDocuments({ ...openBase, ...assignedClause }),
     ]);
 
+    const data = await hydrateIssueNames(issues, { req, tenantId: req.ctx.tenantId });
     return res.status(200).json({
       success: true,
-      data: issues,
+      data,
       meta: {
         scope,
         page,
@@ -255,7 +258,8 @@ async function searchIssues(req, res, next) {
       ...priorityThenCreatedSortStages(),
     ]);
 
-    return res.status(200).json({ success: true, data: issues });
+    const data = await hydrateIssueNames(issues, { req, tenantId });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     return next(AppError.internalServerError(error.message || "Failed to search issues"));
   }
@@ -266,7 +270,8 @@ async function getIssueById(req, res, next) {
     const filter = { ...baseListFilter(req), _id: req.params.id };
     const issue = await Issue.findOne(filter);
     if (!issue) return next(AppError.notFound("Issue not found"));
-    return res.status(200).json({ success: true, data: issue });
+    const [data] = await hydrateIssueNames([issue], { req, tenantId: req.ctx.tenantId });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     if (error.name === "CastError") return next(AppError.notFound("Issue not found"));
     return next(AppError.internalServerError(error.message || "Failed to fetch issue"));
@@ -397,7 +402,8 @@ async function updateIssue(req, res, next) {
       });
     }
 
-    return res.status(200).json({ success: true, data: issue });
+    const [data] = await hydrateIssueNames([issue], { req, tenantId });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     if (error.name === "ValidationError") {
       return next(AppError.badRequest(error.message));
@@ -490,7 +496,8 @@ async function updateIssueStatus(req, res, next) {
       });
     }
 
-    return res.status(200).json({ success: true, data: issue });
+    const [data] = await hydrateIssueNames([issue], { req, tenantId });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     if (error.name === "ValidationError") {
       return next(AppError.badRequest(error.message));
