@@ -207,6 +207,34 @@ describeDb("issue grid tenant-owned defaults migration (real mongod)", () => {
     expect(index).toMatchObject({ state: "present", anomalies: [] });
   });
 
+  test("the partial index covers only string tenant ids: null, missing, \"\" and ObjectId rows are outside it", async () => {
+    await apply([A], "edge");
+    const oid = new ObjectId(B);
+    const base = { ...tenantless("issuesftp") };
+    delete base.tenantId;
+    const outside = [
+      { ...base, tenantId: null }, { ...base, tenantId: null }, // null x2
+      { ...base }, { ...base }, // missing x2
+      { ...base, tenantId: "" }, { ...base, tenantId: "" }, // empty string x2
+      { ...base, tenantId: oid }, { ...base, tenantId: oid }, // same ObjectId x2
+    ];
+    await expect(coll().insertMany(outside)).resolves.toBeTruthy(); // no unique violation: none is indexed
+    const indexed = await coll().find(m.INDEX_PARTIAL).toArray();
+    expect(indexed).toHaveLength(5);
+    expect(indexed.every((d) => d.tenantId === A)).toBe(true);
+    // index usage agrees: an index-only count on the partial filter sees exactly the 5 string-tenant rows
+    expect(await coll().countDocuments(m.INDEX_PARTIAL, { hint: m.INDEX_NAME })).toBe(5);
+  });
+
+  test("an ObjectId-typed tenantId for a requested tenant is refused (anomaly, apply blocked)", async () => {
+    await coll().insertOne({ ...tenantless("issuesir"), tenantId: new ObjectId(B) });
+    const p = await plan([B]);
+    expect(p.anomalies.join()).toMatch(/store tenantId as ObjectId/);
+    const hashes = await allHashes();
+    await expect(m.applyMigration(db, p, { outDir: outDir(), runId: "oid", dbName: "test" })).rejects.toThrow(/refusing to apply/);
+    expect(await allHashes()).toEqual(hashes);
+  });
+
   test("pre-existing duplicate active tenant defaults are reported and block apply", async () => {
     await coll().insertMany([{ ...tenantless("issuesir"), tenantId: B }, { ...tenantless("issuesir"), tenantId: B }]);
     const index = await m.inspectIndex(db);
