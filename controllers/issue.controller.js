@@ -284,12 +284,23 @@ async function createIssue(req, res, next) {
     const body = req.body || {};
     const { issueType } = body;
 
-    if (!issueType || !DISCRIMINATOR_MODELS[issueType]) {
+    // Own-property lookup so an inherited key ("constructor", "__proto__") is unknown, not a pass.
+    if (
+      typeof issueType !== "string" ||
+      !Object.prototype.hasOwnProperty.call(DISCRIMINATOR_MODELS, issueType)
+    ) {
       return next(
         AppError.badRequest(
           `issueType must be one of ${Object.keys(DISCRIMINATOR_MODELS).join(", ")}`,
         ),
       );
+    }
+
+    // The route floor is only the base issues:write; the caller picks the team via issueType,
+    // so creating requires that team's exact issues-<team>:write - the same check update /
+    // status / delete apply to the loaded issue. "*" (ASU) still passes via hasPermission.
+    if (!issueService.hasTeamWritePermission(req, issueType)) {
+      return next(AppError.forbidden("Not permitted to create issues of this type"));
     }
 
     const Model = DISCRIMINATOR_MODELS[issueType];
