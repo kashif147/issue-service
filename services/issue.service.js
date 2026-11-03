@@ -21,7 +21,9 @@ const TEAM_RESOURCE_BY_ISSUE_TYPE = {
 };
 
 function teamResourceForIssueType(issueType) {
-  return TEAM_RESOURCE_BY_ISSUE_TYPE[issueType] || null;
+  return Object.prototype.hasOwnProperty.call(TEAM_RESOURCE_BY_ISSUE_TYPE, issueType)
+    ? TEAM_RESOURCE_BY_ISSUE_TYPE[issueType]
+    : null;
 }
 
 /**
