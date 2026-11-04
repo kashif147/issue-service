@@ -4,6 +4,7 @@ const issueController = require("../controllers/issue.controller.js");
 const issuePortalController = require("../controllers/issuePortal.controller.js");
 const { defaultPolicyMiddleware } = require("../middlewares/policy.middleware.js");
 const { upload } = require("../middlewares/upload.mw.js");
+const { requirePortalUser } = require("../middlewares/portalOnly.mw.js");
 
 router.get("/", defaultPolicyMiddleware.requirePermission("issues", "read"), issueController.listIssues);
 
@@ -34,6 +35,9 @@ router.get(
 const portalRead = defaultPolicyMiddleware.requirePermission("portal", "read");
 const portalWrite = defaultPolicyMiddleware.requirePermission("portal", "write");
 const portalRouter = express.Router();
+// PDP rollout P2 (Q8): PORTAL callers only, before every portal route (see middlewares/portalOnly.mw.js).
+// A CRM token is refused here even when its role holds portal:read/portal:write.
+portalRouter.use(requirePortalUser);
 portalRouter.get("/mine", portalRead, issuePortalController.portalListMyIssues);
 portalRouter.post("/", portalWrite, issuePortalController.portalCreateIssue);
 portalRouter.get("/:id", portalRead, issuePortalController.portalGetMyIssueById);
