@@ -1,7 +1,7 @@
 // PDP rollout P2 (b), issue-service, through the REAL route wiring (middlewares/auth.js authenticate ->
 // tenantContextWarn -> routes/index.js -> routes):
-//   Q1  IRO/PA assignment writes (POST /, PUT /:id, DELETE /:id) need issues:write AND issues-ir:write;
-//       GET keeps issues:read only.
+//   Q1  IRO/PA assignments are gated by the IR team resource alone (owner decision 2026-11-08): GET needs
+//       issues-ir:read, POST / PUT /:id / DELETE /:id need issues-ir:write; the generic issues:* codes open nothing.
 //   Q8  every /issues/portal/* route is PORTAL-only (middlewares/portalOnly.mw.js requirePortalUser),
 //       registered before the portal routes, so a CRM token is refused even when it holds portal:*.
 // Only the PDP round trip (policyClient.evaluateWithHeaders) is replaced by a stand-in that PERMITs
@@ -96,31 +96,33 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
-describe("Q1: IRO/PA assignment writes require issues-ir:write on top of issues:write", () => {
+describe("Q1: IRO/PA assignments are gated by issues-ir only (no generic issues:* requirement)", () => {
   const WRITES = [
     ["post", "/api/iro-pa-assignments", "create"],
     ["put", `/api/iro-pa-assignments/${ID}`, "update"],
     ["delete", `/api/iro-pa-assignments/${ID}`, "remove"],
   ];
+  const GENERIC_ISSUES = ["issues:read", "issues:write", "issues-complaints:read", "issues-complaints:write"];
 
-  test.each(WRITES)("%s %s: MO-like CRM (issues:write, no issues-ir:write) -> 403, controller not reached", async (m, p) => {
-    const res = await send(m, p, headers(["issues:read", "issues:write", "issues-complaints:read", "issues-complaints:write"]));
-    expect(res.status).toBe(403);
-    expect(res.body.handler).toBeUndefined();
-    expect(pdpCalls).toEqual(["issues:write", "issues-ir:write"]);
-  });
-
-  test.each(WRITES)("%s %s: issues:write + issues-ir:write -> reaches the controller", async (m, p, handler) => {
-    const res = await send(m, p, headers(["issues:write", "issues-ir:write"]));
+  test.each(WRITES)("%s %s: IRO-like CRM (issues-ir:read + issues-ir:write, no issues:*) -> reaches the controller", async (m, p, handler) => {
+    const res = await send(m, p, headers(["issues-ir:read", "issues-ir:write"]));
     expect(res.status).toBe(200);
     expect(res.body.handler).toBe(handler);
-    expect(pdpCalls).toEqual(["issues:write", "issues-ir:write"]);
+    expect(pdpCalls).toEqual(["issues-ir:write"]);
   });
 
-  test.each(WRITES)("%s %s: issues-ir:write without the issues:write floor -> 403", async (m, p) => {
-    const res = await send(m, p, headers(["issues-ir:write"]));
+  test.each(WRITES)("%s %s: generic issues:* without the IR team code (REO/MO-like) -> 403, controller not reached", async (m, p) => {
+    const res = await send(m, p, headers(GENERIC_ISSUES));
     expect(res.status).toBe(403);
-    expect(pdpCalls).toEqual(["issues:write"]);
+    expect(res.body.handler).toBeUndefined();
+    expect(pdpCalls).toEqual(["issues-ir:write"]);
+  });
+
+  test.each(WRITES)("%s %s: issues-ir:read alone cannot change assignments -> 403", async (m, p) => {
+    const res = await send(m, p, headers(["issues-ir:read"]));
+    expect(res.status).toBe(403);
+    expect(res.body.handler).toBeUndefined();
+    expect(pdpCalls).toEqual(["issues-ir:write"]);
   });
 
   test.each(WRITES)("%s %s: ASU-style '*' -> reaches the controller", async (m, p, handler) => {
@@ -129,11 +131,37 @@ describe("Q1: IRO/PA assignment writes require issues-ir:write on top of issues:
     expect(res.body.handler).toBe(handler);
   });
 
-  test("GET is unchanged: issues:read only, no team check", async () => {
-    const res = await send("get", "/api/iro-pa-assignments", headers(["issues:read"]));
+  test("GET with issues-ir:read -> list; only issues-ir:read is asked", async () => {
+    const res = await send("get", "/api/iro-pa-assignments", headers(["issues-ir:read"]));
     expect(res.status).toBe(200);
     expect(res.body.handler).toBe("list");
-    expect(pdpCalls).toEqual(["issues:read"]);
+    expect(pdpCalls).toEqual(["issues-ir:read"]);
+  });
+
+  test("GET with generic issues:* only (no IR team code) -> 403", async () => {
+    const res = await send("get", "/api/iro-pa-assignments", headers(GENERIC_ISSUES));
+    expect(res.status).toBe(403);
+    expect(res.body.handler).toBeUndefined();
+    expect(pdpCalls).toEqual(["issues-ir:read"]);
+  });
+
+  test("GET with issues-ir:write only -> 403 (write does not imply read at the PDP)", async () => {
+    const res = await send("get", "/api/iro-pa-assignments", headers(["issues-ir:write"]));
+    expect(res.status).toBe(403);
+    expect(pdpCalls).toEqual(["issues-ir:read"]);
+  });
+
+  test("GET with '*' -> list", async () => {
+    const res = await send("get", "/api/iro-pa-assignments", headers(["*"]));
+    expect(res.status).toBe(200);
+    expect(res.body.handler).toBe("list");
+  });
+
+  test("source: every assignment route carries exactly one issues-ir guard and no generic issues guard", () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../routes/iroPaAssignment.routes.js"), "utf8");
+    expect(src.match(/requirePermission\("issues-ir", "read"\)/g)).toHaveLength(1);
+    expect(src.match(/requirePermission\("issues-ir", "write"\)/g)).toHaveLength(3);
+    expect(src).not.toMatch(/requirePermission\("issues",/);
   });
 });
 

@@ -1,10 +1,9 @@
 const IroPaAssignment = require("../models/iroPaAssignment.model");
 const { AppError } = require("../errors/AppError");
 
-// Simple, admin-managed CRUD (plan §1.1) - the requirements doc doesn't specify a dedicated
-// RBAC resource for this, so it's gated at the route level under the base "issues" resource
-// (the same one gating POST /issues), not one of the four team-scoped issues-<team>
-// resources - this data isn't owned by any single team.
+// Simple CRUD (plan §1.1), gated at the route level by the Industrial Relations team resource
+// "issues-ir" (read to list, write to change) - PDP rollout P2 Q1, see routes/iroPaAssignment.routes.js.
+// Every query is bound to req.ctx.tenantId.
 
 async function list(req, res, next) {
   try {
